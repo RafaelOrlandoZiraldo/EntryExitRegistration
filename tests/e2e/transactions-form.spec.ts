@@ -16,6 +16,7 @@ test("user can create edit and delete a transaction", async ({ page }) => {
   await expect(
     page.getByRole("heading", { name: "Listado de movimientos" })
   ).toBeVisible();
+  await expect(page.getByText("Sin movimientos registrados")).toBeVisible();
 
   await page.getByRole("button", { name: "Nuevo movimiento" }).first().click();
   const createDialog = page.getByRole("dialog", { name: "Nuevo movimiento" });
@@ -52,6 +53,7 @@ test("user can create edit and delete a transaction", async ({ page }) => {
   await expect(editedRow).toBeVisible();
   await expect(editedRow).toContainText(/\$\s1\.300,00/);
 
+  await page.getByRole("button", { name: "Mostrar filtros" }).click();
   await page.getByLabel("Texto").fill("editada");
   await page.getByRole("button", { name: "Aplicar filtros" }).click();
   await expect(editedRow).toBeVisible();

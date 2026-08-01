@@ -60,21 +60,19 @@ export function TransactionsFilterPanel({
         <Button
           aria-expanded={isExpanded}
           aria-controls="transaction-filter-panel"
-          className="md:hidden"
-          size="icon"
           type="button"
           variant="outline"
           onClick={() => {
             setIsExpanded((current) => !current);
           }}
         >
-          <SlidersHorizontal aria-hidden="true" className="h-4 w-4" />
-          <span className="sr-only">Mostrar filtros</span>
+          <SlidersHorizontal aria-hidden="true" className="mr-2 h-4 w-4" />
+          {isExpanded ? "Ocultar filtros" : "Mostrar filtros"}
         </Button>
       </div>
 
       <div
-        className={isExpanded ? "mt-4 grid gap-4" : "mt-4 hidden gap-4 md:grid"}
+        className={isExpanded ? "mt-4 grid gap-4" : "hidden"}
         id="transaction-filter-panel"
       >
         <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">

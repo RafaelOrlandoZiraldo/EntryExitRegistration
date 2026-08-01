@@ -257,6 +257,7 @@ describe("TransactionsPage", () => {
     );
 
     await screen.findAllByText("Supermercado");
+    await openFilters(user);
     await user.selectOptions(screen.getByLabelText("Tipo"), "expense");
     await user.selectOptions(screen.getByLabelText("Categoria"), "groceries");
     await user.selectOptions(screen.getByLabelText("Medio de pago"), "debit_card");
@@ -285,6 +286,7 @@ describe("TransactionsPage", () => {
     );
 
     await screen.findAllByText("Sueldo");
+    await openFilters(user);
     await user.type(screen.getByLabelText("Texto"), "no existe");
     await user.click(screen.getByRole("button", { name: "Aplicar filtros" }));
 
@@ -307,6 +309,7 @@ describe("TransactionsPage", () => {
     );
 
     await screen.findAllByText("Sueldo");
+    await openFilters(user);
     await user.type(screen.getByLabelText("Importe minimo"), "500");
     await user.type(screen.getByLabelText("Importe maximo"), "100");
     await user.click(screen.getByRole("button", { name: "Aplicar filtros" }));
@@ -327,6 +330,7 @@ describe("TransactionsPage", () => {
     );
 
     await screen.findAllByText("Sueldo");
+    await openFilters(user);
     await user.selectOptions(screen.getByLabelText("Tipo"), "income");
     await user.click(screen.getByRole("button", { name: "Aplicar filtros" }));
     expect(screen.queryByText(/\$\s320,50/)).not.toBeInTheDocument();
@@ -347,6 +351,7 @@ describe("TransactionsPage", () => {
     );
 
     await screen.findAllByText("Sueldo");
+    await openFilters(user);
     await user.selectOptions(screen.getByLabelText("Ordenar por"), "amount");
     await user.selectOptions(screen.getByLabelText("Direccion"), "asc");
     await user.click(screen.getByRole("button", { name: "Aplicar filtros" }));
@@ -645,4 +650,8 @@ async function fillTransactionForm(
   await user.selectOptions(dialog.getByLabelText("Categoria"), "groceries");
   await user.type(dialog.getByLabelText("Descripcion"), description);
   await user.selectOptions(dialog.getByLabelText("Medio de pago"), "debit_card");
+}
+
+async function openFilters(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getByRole("button", { name: "Mostrar filtros" }));
 }
