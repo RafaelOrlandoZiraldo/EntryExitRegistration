@@ -110,20 +110,7 @@ Production branch: main
 ```
 
 Si Cloudflare autodetecta otro framework, por ejemplo Hydrogen, ignorar esa
-deteccion y usar la configuracion manual anterior. El archivo `wrangler.toml`
-declara `pages_build_output_dir = "./dist"` para que Pages use la carpeta
-generada por Vite.
-
-Si se despliega por CLI, usar Pages:
-
-```bash
-npx wrangler pages deploy dist --project-name entryexitregistration
-```
-
-No usar `npx wrangler deploy` para este MVP. Ese comando pertenece al flujo de
-Workers; el proyecto no tiene Worker ni entrypoint server-side. Usarlo puede
-hacer que Cloudflare valide `_redirects` como assets de Workers y rechace la
-regla SPA.
+deteccion y usar la configuracion manual anterior.
 
 Variables de entorno:
 
