@@ -1,5 +1,6 @@
 import { Navigate, createBrowserRouter } from "react-router-dom";
 import { mapErrorToUserMessage } from "@app/errors/errorMessages";
+import { authServices } from "@app/services/auth";
 import { transactionServices } from "@app/services/transactions";
 import { AppShell } from "@app/shell/AppShell";
 import { LoginPage, ProtectedRoute } from "@features/auth";
@@ -31,6 +32,9 @@ export const router = createBrowserRouter([
                 deleteTransactionUseCase={
                   transactionServices.deleteTransaction
                 }
+                deleteAllTransactionsUseCase={
+                  transactionServices.deleteAllTransactions
+                }
                 downloadFile={transactionServices.downloadFile}
                 exportStorageDocumentUseCase={
                   transactionServices.exportStorageDocument
@@ -46,6 +50,7 @@ export const router = createBrowserRouter([
                 updateTransactionUseCase={
                   transactionServices.updateTransaction
                 }
+                verifyPasswordUseCase={authServices.verifyPassword}
               />
             )
           }

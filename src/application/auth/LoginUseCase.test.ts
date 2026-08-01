@@ -3,6 +3,7 @@ import {
   AuthenticationConfigurationError,
   InvalidCredentialsError,
   LoginUseCase,
+  VerifyPasswordUseCase,
   type AuthConfig,
   type AuthSession,
   type PasswordVerifier,
@@ -87,5 +88,29 @@ describe("LoginUseCase", () => {
     await expect(
       useCase.execute({ username: "admin", password: "correct-password" })
     ).rejects.toThrow(AuthenticationConfigurationError);
+  });
+});
+
+describe("VerifyPasswordUseCase", () => {
+  it("execute_WhenPasswordIsValid_ShouldResolveWithoutCreatingSession", async () => {
+    const sessionService = new FakeSessionService();
+    const useCase = new VerifyPasswordUseCase({
+      config,
+      passwordVerifier: new FakePasswordVerifier(true)
+    });
+
+    await expect(useCase.execute("correct-password")).resolves.toBeUndefined();
+    expect(sessionService.getCurrent()).toBeNull();
+  });
+
+  it("execute_WhenPasswordIsInvalid_ShouldReject", async () => {
+    const useCase = new VerifyPasswordUseCase({
+      config,
+      passwordVerifier: new FakePasswordVerifier(false)
+    });
+
+    await expect(useCase.execute("wrong-password")).rejects.toThrow(
+      InvalidCredentialsError
+    );
   });
 });

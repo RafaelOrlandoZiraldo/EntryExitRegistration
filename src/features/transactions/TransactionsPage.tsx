@@ -26,6 +26,7 @@ import {
   PageTitle,
   TransactionTypeBadge
 } from "@shared/ui";
+import { DeleteAllTransactionsDialog } from "./DeleteAllTransactionsDialog";
 import {
   formatTransactionAmount,
   formatTransactionDate,
@@ -58,6 +59,12 @@ export interface TransactionsPageProps {
   deleteTransactionUseCase: {
     execute(id: string): Promise<void>;
   };
+  deleteAllTransactionsUseCase: {
+    execute(this: void): Promise<void>;
+  };
+  verifyPasswordUseCase: {
+    execute(password: string): Promise<void>;
+  };
   exportStorageDocumentUseCase: {
     execute(this: void): Promise<ExportStorageDocumentResult>;
   };
@@ -89,6 +96,8 @@ export function TransactionsPage({
   createTransactionUseCase,
   updateTransactionUseCase,
   deleteTransactionUseCase,
+  deleteAllTransactionsUseCase,
+  verifyPasswordUseCase,
   exportStorageDocumentUseCase,
   previewImportStorageDocumentUseCase,
   importStorageDocumentUseCase,
@@ -199,6 +208,18 @@ export function TransactionsPage({
                 <Plus aria-hidden="true" className="mr-2 h-4 w-4" />
                 Nuevo movimiento
               </Button>
+              {state.transactions.length > 0 ? (
+                <Button
+                  type="button"
+                  variant="destructive"
+                  onClick={() => {
+                    setDeleteState({ status: "confirmingAll" });
+                  }}
+                >
+                  <Trash2 aria-hidden="true" className="mr-2 h-4 w-4" />
+                  Eliminar todos
+                </Button>
+              ) : null}
             </div>
           ) : null
         }
@@ -320,6 +341,26 @@ export function TransactionsPage({
         }}
         mapError={mapError}
       />
+
+      <DeleteAllTransactionsDialog
+        open={deleteState.status === "confirmingAll"}
+        transactionCount={
+          state.status === "success" ? state.transactions.length : 0
+        }
+        onOpenChange={(open) => {
+          if (!open) {
+            setDeleteState({ status: "closed" });
+          }
+        }}
+        onVerifyPassword={(password) => verifyPasswordUseCase.execute(password)}
+        onDeleteAll={() => deleteAllTransactionsUseCase.execute()}
+        onSuccess={async () => {
+          await getTransactionsUseCase.execute().then((transactions) => {
+            setState({ status: "success", transactions });
+          });
+        }}
+        mapError={mapError}
+      />
     </section>
   );
 }
@@ -387,7 +428,8 @@ type FormState =
 
 type DeleteState =
   | { status: "closed" }
-  | { status: "confirming"; transaction: FinancialTransaction };
+  | { status: "confirming"; transaction: FinancialTransaction }
+  | { status: "confirmingAll" };
 
 function TransactionsList({
   transactions,

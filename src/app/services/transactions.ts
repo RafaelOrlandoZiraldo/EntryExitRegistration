@@ -1,5 +1,6 @@
 import {
   CreateTransaction,
+  DeleteAllTransactions,
   DeleteTransaction,
   ExportStorageDocument,
   GetTransactions,
@@ -35,6 +36,9 @@ export const transactionServices = {
     clock
   }),
   deleteTransaction: new DeleteTransaction({
+    repository: transactionRepository
+  }),
+  deleteAllTransactions: new DeleteAllTransactions({
     repository: transactionRepository
   }),
   exportStorageDocument: new ExportStorageDocument({

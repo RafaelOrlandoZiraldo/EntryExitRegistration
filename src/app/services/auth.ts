@@ -1,4 +1,10 @@
 import {
+  VerifyPasswordUseCase,
+  type AuthConfig,
+  type PasswordVerifier,
+  type SessionService
+} from "@application/auth";
+import {
   readAuthConfigFromEnv,
   SessionStorageSessionService,
   SystemEpochClock,
@@ -16,3 +22,19 @@ export function createBrowserAuthDependencies(): AuthProviderProps["dependencies
     )
   };
 }
+
+const browserAuthDependencies = createBrowserAuthDependencies();
+
+export const authServices = {
+  dependencies: browserAuthDependencies,
+  verifyPassword: new VerifyPasswordUseCase({
+    config: browserAuthDependencies.config,
+    passwordVerifier: browserAuthDependencies.passwordVerifier
+  })
+};
+
+export type BrowserAuthDependencies = {
+  config: AuthConfig | null;
+  passwordVerifier: PasswordVerifier;
+  sessionService: SessionService;
+};

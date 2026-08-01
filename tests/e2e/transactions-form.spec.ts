@@ -7,6 +7,7 @@ test("user can create edit and delete a transaction", async ({ page }) => {
     await root.removeEntry("domestic-finance.json").catch(() => undefined);
     await root.removeEntry("domestic-finance.json.tmp").catch(() => undefined);
   });
+  await page.reload();
 
   await page.getByLabel("Usuario").fill("admin");
   await page.getByLabel("Contrasena").fill("correct-password");
@@ -124,23 +125,24 @@ test("user can create edit and delete a transaction", async ({ page }) => {
   await expect(restoredRow).toBeVisible();
   await expect(restoredRow).toContainText(/\$\s777,00/);
 
-  await page
-    .getByRole("button", {
-      name: "Eliminar movimiento Movimiento restaurado"
-    })
-    .first()
-    .click();
-  await expect(page.getByRole("dialog")).toHaveAccessibleName(
-    "Eliminar movimiento"
+  await page.getByRole("button", { name: "Eliminar todos" }).click();
+  const deleteAllDialog = page.getByRole("dialog", {
+    name: "Eliminar todos los movimientos"
+  });
+  await expect(deleteAllDialog).toBeVisible();
+  await expect(deleteAllDialog.getByText("Se eliminaran 1 movimientos")).toBeVisible();
+  await deleteAllDialog.getByLabel("Contrasena").fill("wrong-password");
+  await deleteAllDialog.getByRole("button", { name: "Eliminar todos" }).click();
+  await expect(deleteAllDialog.getByRole("alert")).toContainText(
+    "Usuario o contrasena invalidos."
   );
-  await expect(page.getByText("Egreso").last()).toBeVisible();
-  await expect(page.getByText("20/08/2026").last()).toBeVisible();
-  await expect(page.getByText(/\$\s777,00/).last()).toBeVisible();
-  await expect(
-    page.getByText("Esta eliminacion es fisica y no se puede deshacer.")
-  ).toBeVisible();
+  await deleteAllDialog.getByRole("button", { name: "Cancelar" }).click();
+  await expect(restoredRow).toBeVisible();
 
-  await page.getByRole("button", { name: "Eliminar definitivamente" }).click();
+  await page.getByRole("button", { name: "Eliminar todos" }).click();
+  await expect(deleteAllDialog).toBeVisible();
+  await deleteAllDialog.getByLabel("Contrasena").fill("correct-password");
+  await deleteAllDialog.getByRole("button", { name: "Eliminar todos" }).click();
 
   await expect(page.getByText("Sin movimientos registrados")).toBeVisible();
 });

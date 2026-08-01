@@ -1,6 +1,7 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
+import { InvalidCredentialsError } from "@application/auth";
 import type { StorageDocument } from "@domain/storage";
 import type { FinancialTransaction } from "@domain/transactions";
 import { TransactionsPage } from "./TransactionsPage";
@@ -244,6 +245,67 @@ describe("TransactionsPage", () => {
       "No se pudo completar la operacion."
     );
     expect(screen.getAllByText("Supermercado")).not.toHaveLength(0);
+  });
+
+  it("TransactionsPage_WhenDeleteAllPasswordIsInvalid_ShouldKeepTransactions", async () => {
+    const user = userEvent.setup();
+    const verifyPasswordExecute = vi.fn(() =>
+      Promise.reject(new InvalidCredentialsError())
+    );
+    const deleteAllExecute = vi.fn(() => Promise.resolve());
+    render(
+      <TransactionsPage
+        {...createUseCases({
+          transactions,
+          deleteAllExecute,
+          verifyPasswordExecute
+        })}
+      />
+    );
+
+    await screen.findAllByText("Sueldo");
+    await user.click(screen.getByRole("button", { name: "Eliminar todos" }));
+    const dialog = within(screen.getByRole("dialog"));
+    await user.type(dialog.getByLabelText("Contrasena"), "wrong-password");
+    await user.click(dialog.getByRole("button", { name: "Eliminar todos" }));
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Usuario o contrasena invalidos."
+    );
+    expect(deleteAllExecute).not.toHaveBeenCalled();
+    expect(screen.getAllByText("Sueldo")).not.toHaveLength(0);
+  });
+
+  it("TransactionsPage_WhenDeleteAllPasswordIsValid_ShouldDeleteRefreshAndClose", async () => {
+    const user = userEvent.setup();
+    const execute = vi
+      .fn<() => Promise<FinancialTransaction[]>>()
+      .mockResolvedValueOnce(transactions)
+      .mockResolvedValueOnce([]);
+    const verifyPasswordExecute = vi.fn(() => Promise.resolve());
+    const deleteAllExecute = vi.fn(() => Promise.resolve());
+    render(
+      <TransactionsPage
+        {...createUseCases({
+          execute,
+          deleteAllExecute,
+          verifyPasswordExecute
+        })}
+      />
+    );
+
+    await screen.findAllByText("Sueldo");
+    await user.click(screen.getByRole("button", { name: "Eliminar todos" }));
+    const dialog = within(screen.getByRole("dialog"));
+    await user.type(dialog.getByLabelText("Contrasena"), "correct-password");
+    await user.click(dialog.getByRole("button", { name: "Eliminar todos" }));
+
+    await waitFor(() => {
+      expect(verifyPasswordExecute).toHaveBeenCalledWith("correct-password");
+    });
+    expect(deleteAllExecute).toHaveBeenCalledTimes(1);
+    expect(await screen.findByText("Sin movimientos registrados")).toBeInTheDocument();
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
   });
 
   it("TransactionsPage_WhenFiltersAreApplied_ShouldCombineCriteriaWithAndLogic", async () => {
@@ -530,6 +592,8 @@ function createUseCases({
       ...(input as object)
     } as FinancialTransaction),
   deleteExecute = () => Promise.resolve(),
+  deleteAllExecute = () => Promise.resolve(),
+  verifyPasswordExecute = () => Promise.resolve(),
   exportExecute = () =>
     Promise.resolve({
       fileName: "domestic-finance-2026-08-01.json",
@@ -573,6 +637,13 @@ function createUseCases({
       };
     }
 
+    if (error instanceof InvalidCredentialsError) {
+      return {
+        title: "Credenciales invalidas",
+        message: "Usuario o contrasena invalidos."
+      };
+    }
+
     return {
       title: "Error inesperado",
       message: "No se pudo completar la operacion."
@@ -584,6 +655,8 @@ function createUseCases({
   createExecute?: (input: unknown) => Promise<FinancialTransaction>;
   updateExecute?: (input: unknown) => Promise<FinancialTransaction>;
   deleteExecute?: (id: string) => Promise<void>;
+  deleteAllExecute?: () => Promise<void>;
+  verifyPasswordExecute?: (password: string) => Promise<void>;
   exportExecute?: () => Promise<{
     fileName: string;
     contents: string;
@@ -610,6 +683,12 @@ function createUseCases({
     },
     deleteTransactionUseCase: {
       execute: deleteExecute
+    },
+    deleteAllTransactionsUseCase: {
+      execute: deleteAllExecute
+    },
+    verifyPasswordUseCase: {
+      execute: verifyPasswordExecute
     },
     exportStorageDocumentUseCase: {
       execute: exportExecute

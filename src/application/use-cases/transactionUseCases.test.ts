@@ -5,6 +5,7 @@ import type { FinancialTransaction } from "@domain/transactions";
 import type { Clock, IdGenerator, TransactionRepository } from "@application/ports";
 import {
   CreateTransaction,
+  DeleteAllTransactions,
   DeleteTransaction,
   GetTransactions,
   SearchTransactions,
@@ -176,6 +177,19 @@ describe("transaction use cases", () => {
     await useCase.execute("existing-id");
 
     expect(repository.transactions).toEqual([]);
+  });
+
+  it("DeleteAllTransactions_WhenTransactionsExist_ShouldPhysicallyRemoveEveryTransaction", async () => {
+    const repository = new FakeTransactionRepository([
+      existingTransaction,
+      { ...existingTransaction, id: "second-id" }
+    ]);
+    const useCase = new DeleteAllTransactions({ repository });
+
+    await useCase.execute();
+
+    expect(repository.transactions).toEqual([]);
+    expect(repository.replaceCount).toBe(1);
   });
 
   it("GetTransactions_WhenTransactionsExist_ShouldReturnRepositoryData", async () => {
