@@ -29,6 +29,15 @@ describe("parseAuthConfig", () => {
     ).toBeNull();
   });
 
+  it("parseAuthConfig_WhenEnvironmentVariableIsUndefined_ShouldFailClosed", () => {
+    expect(
+      parseAuthConfig({
+        ...validEnv,
+        VITE_SESSION_TIMEOUT_MINUTES: undefined
+      })
+    ).toBeNull();
+  });
+
   it("parseAuthConfig_WhenBase64IsInvalid_ShouldFailClosed", () => {
     expect(
       parseAuthConfig({

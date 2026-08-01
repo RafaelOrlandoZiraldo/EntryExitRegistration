@@ -28,7 +28,19 @@ export function parseAuthConfig(env: AuthEnvironment): AuthConfig | null {
 }
 
 export function readAuthConfigFromEnv() {
-  return parseAuthConfig(import.meta.env);
+  const username = import.meta.env.VITE_AUTH_USERNAME;
+  const passwordHash = import.meta.env.VITE_AUTH_PASSWORD_HASH;
+  const passwordSalt = import.meta.env.VITE_AUTH_PASSWORD_SALT;
+  const passwordIterations = import.meta.env.VITE_AUTH_PASSWORD_ITERATIONS;
+  const sessionTimeoutMinutes = import.meta.env.VITE_SESSION_TIMEOUT_MINUTES;
+
+  return parseAuthConfig({
+    VITE_AUTH_USERNAME: username,
+    VITE_AUTH_PASSWORD_HASH: passwordHash,
+    VITE_AUTH_PASSWORD_SALT: passwordSalt,
+    VITE_AUTH_PASSWORD_ITERATIONS: passwordIterations,
+    VITE_SESSION_TIMEOUT_MINUTES: sessionTimeoutMinutes
+  });
 }
 
 function isValidBase64(value: string) {
