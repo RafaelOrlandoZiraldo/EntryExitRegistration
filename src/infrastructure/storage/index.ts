@@ -1,5 +1,6 @@
 export * from "./errors";
 export * from "./InMemoryTextFileAdapter";
+export * from "./OpfsBackupRepository";
 export * from "./OpfsTextFileAdapter";
 export * from "./OpfsTransactionRepository";
 export * from "./TextFileAdapter";

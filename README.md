@@ -87,17 +87,32 @@ Consecuencias:
 
 Usar exportacion JSON periodica como respaldo.
 
+La aplicacion tambien genera un backup automatico diario en OPFS con nombre:
+
+```text
+domestic-finance-backup-YYYY-MM-DD.json
+```
+
+El backup se intenta crear al abrir la aplicacion y luego una vez por dia a la
+medianoche local mientras la app permanezca abierta. Si la app esta cerrada a
+medianoche, el backup faltante del dia se crea al volver a abrirla.
+
 ## Cloudflare Pages
 
 Configuracion recomendada:
 
 ```text
-Framework preset: React (Vite)
+Framework preset: None
 Build command: npm run build
 Build output directory: dist
 Root directory: /
 Production branch: main
 ```
+
+Si Cloudflare autodetecta otro framework, por ejemplo Hydrogen, ignorar esa
+deteccion y usar la configuracion manual anterior. El archivo `wrangler.toml`
+declara `pages_build_output_dir = "./dist"` para que Pages use la carpeta
+generada por Vite.
 
 Variables de entorno:
 

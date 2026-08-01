@@ -1,4 +1,5 @@
 import {
+  CreateDailyBackup,
   CreateTransaction,
   DeleteAllTransactions,
   DeleteTransaction,
@@ -11,18 +12,25 @@ import {
 import {
   BrowserFileDownloadAdapter,
   BrowserIdGenerator,
+  OpfsBackupRepository,
   OpfsTextFileAdapter,
   OpfsTransactionRepository,
   SystemIsoClock
 } from "@infrastructure/index";
 
 const clock = new SystemIsoClock();
+const textFileAdapter = new OpfsTextFileAdapter();
 const transactionRepository = new OpfsTransactionRepository(
-  new OpfsTextFileAdapter(),
+  textFileAdapter,
   clock
 );
+const backupRepository = new OpfsBackupRepository(textFileAdapter);
 
 export const transactionServices = {
+  createDailyBackup: new CreateDailyBackup({
+    backupRepository,
+    transactionRepository
+  }),
   getTransactions: new GetTransactions({
     repository: transactionRepository
   }),

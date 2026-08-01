@@ -1,3 +1,4 @@
+export * from "./CreateDailyBackup";
 export * from "./CreateTransaction";
 export * from "./DeleteAllTransactions";
 export * from "./DeleteTransaction";
