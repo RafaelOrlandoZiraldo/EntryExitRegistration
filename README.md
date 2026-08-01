@@ -121,7 +121,9 @@ npx wrangler pages deploy dist --project-name entryexitregistration
 ```
 
 No usar `npx wrangler deploy` para este MVP. Ese comando pertenece al flujo de
-Workers; el proyecto no tiene Worker ni entrypoint server-side.
+Workers; el proyecto no tiene Worker ni entrypoint server-side. Usarlo puede
+hacer que Cloudflare valide `_redirects` como assets de Workers y rechace la
+regla SPA.
 
 Variables de entorno:
 
