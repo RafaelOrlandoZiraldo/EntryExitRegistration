@@ -102,6 +102,32 @@ describe("TransactionsPage", () => {
     ).not.toHaveLength(0);
   });
 
+  it("TransactionsPage_WhenMoreThanOnePageExists_ShouldPaginateVisibleRows", async () => {
+    const user = userEvent.setup();
+    const manyTransactions = Array.from({ length: 12 }, (_, index) =>
+      createTransactionFixture(index + 1)
+    );
+    render(
+      <TransactionsPage
+        {...createUseCases({ transactions: manyTransactions })}
+      />
+    );
+
+    expect(await screen.findAllByText("Movimiento 01")).not.toHaveLength(0);
+    expect(screen.queryByText("Movimiento 11")).not.toBeInTheDocument();
+    expect(screen.getByText("Pagina 1 de 2")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Pagina siguiente" }));
+
+    expect(await screen.findAllByText("Movimiento 11")).not.toHaveLength(0);
+    expect(screen.queryByText("Movimiento 01")).not.toBeInTheDocument();
+
+    await user.selectOptions(screen.getByLabelText("Filas por pagina"), "25");
+
+    expect(await screen.findAllByText("Movimiento 01")).not.toHaveLength(0);
+    expect(screen.getByText("Pagina 1 de 1")).toBeInTheDocument();
+  });
+
   it("TransactionsPage_WhenCreateSucceeds_ShouldReloadFromSingleSourceOfTruth", async () => {
     const user = userEvent.setup();
     const createdTransaction: FinancialTransaction = {
@@ -713,6 +739,23 @@ function createStorageDocument(
     schemaVersion: 1,
     lastUpdatedAt: "2026-08-01T15:30:00.000Z",
     transactions: documentTransactions
+  };
+}
+
+function createTransactionFixture(index: number): FinancialTransaction {
+  const paddedIndex = String(index).padStart(2, "0");
+  const day = String(13 - index).padStart(2, "0");
+
+  return {
+    id: `transaction-${paddedIndex}`,
+    type: index % 2 === 0 ? "expense" : "income",
+    date: `2026-08-${day}`,
+    amount: 100 + index,
+    category: index % 2 === 0 ? "groceries" : "salary",
+    description: `Movimiento ${paddedIndex}`,
+    paymentMethod: "bank_transfer",
+    createdAt: `2026-08-${day}T10:00:00.000Z`,
+    updatedAt: `2026-08-${day}T10:00:00.000Z`
   };
 }
 

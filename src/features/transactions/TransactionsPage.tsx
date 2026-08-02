@@ -1,10 +1,12 @@
 import {
   flexRender,
   getCoreRowModel,
+  getPaginationRowModel,
   useReactTable,
-  type ColumnDef
+  type ColumnDef,
+  type PaginationState
 } from "@tanstack/react-table";
-import { Edit, Plus, Trash2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, Edit, Plus, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
   CreateTransactionInput,
@@ -440,6 +442,10 @@ function TransactionsList({
   onEdit(this: void, transaction: FinancialTransaction): void;
   onDelete(this: void, transaction: FinancialTransaction): void;
 }) {
+  const [pagination, setPagination] = useState<PaginationState>({
+    pageIndex: 0,
+    pageSize: 10
+  });
   const columns = useMemo<ColumnDef<FinancialTransaction>[]>(
     () => [
       {
@@ -488,8 +494,23 @@ function TransactionsList({
   const table = useReactTable({
     data: transactions,
     columns,
-    getCoreRowModel: getCoreRowModel()
+    getCoreRowModel: getCoreRowModel(),
+    getPaginationRowModel: getPaginationRowModel(),
+    onPaginationChange: setPagination,
+    state: {
+      pagination
+    }
   });
+  const paginatedTransactions = table
+    .getRowModel()
+    .rows.map((row) => row.original);
+
+  useEffect(() => {
+    setPagination((current) => ({
+      ...current,
+      pageIndex: 0
+    }));
+  }, [transactions]);
 
   return (
     <>
@@ -526,7 +547,7 @@ function TransactionsList({
       </div>
 
       <div className="grid gap-3 md:hidden">
-        {transactions.map((transaction) => (
+        {paginatedTransactions.map((transaction) => (
           <article
             key={transaction.id}
             className="rounded-lg border border-border bg-card p-4 shadow-sm"
@@ -572,7 +593,90 @@ function TransactionsList({
           </article>
         ))}
       </div>
+
+      <TransactionsPagination table={table} totalRows={transactions.length} />
     </>
+  );
+}
+
+function TransactionsPagination({
+  table,
+  totalRows
+}: {
+  table: ReturnType<typeof useReactTable<FinancialTransaction>>;
+  totalRows: number;
+}) {
+  const pageCount = table.getPageCount();
+  const pageIndex = table.getState().pagination.pageIndex;
+  const pageSize = table.getState().pagination.pageSize;
+  const currentPageStart = totalRows === 0 ? 0 : pageIndex * pageSize + 1;
+  const currentPageEnd = Math.min((pageIndex + 1) * pageSize, totalRows);
+
+  if (totalRows <= 10) {
+    return null;
+  }
+
+  return (
+    <nav
+      aria-label="Paginacion de movimientos"
+      className="flex flex-col gap-3 rounded-lg border border-border bg-card p-3 text-sm shadow-sm sm:flex-row sm:items-center sm:justify-between"
+    >
+      <p className="text-muted-foreground">
+        Mostrando {currentPageStart}-{currentPageEnd} de {totalRows}
+      </p>
+
+      <div className="flex flex-wrap items-center gap-2">
+        <label
+          className="flex items-center gap-2 text-muted-foreground"
+          htmlFor="transactions-page-size"
+        >
+          Filas por pagina
+          <select
+            id="transactions-page-size"
+            className="h-9 rounded-md border border-input bg-background px-2 text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            value={pageSize}
+            onChange={(event) => {
+              table.setPageSize(Number(event.target.value));
+            }}
+          >
+            {[10, 25, 50].map((size) => (
+              <option key={size} value={size}>
+                {size}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <p aria-live="polite" className="min-w-24 text-center font-medium">
+          Pagina {pageIndex + 1} de {pageCount}
+        </p>
+
+        <Button
+          aria-label="Pagina anterior"
+          disabled={!table.getCanPreviousPage()}
+          size="icon"
+          type="button"
+          variant="outline"
+          onClick={() => {
+            table.previousPage();
+          }}
+        >
+          <ChevronLeft aria-hidden="true" className="h-4 w-4" />
+        </Button>
+        <Button
+          aria-label="Pagina siguiente"
+          disabled={!table.getCanNextPage()}
+          size="icon"
+          type="button"
+          variant="outline"
+          onClick={() => {
+            table.nextPage();
+          }}
+        >
+          <ChevronRight aria-hidden="true" className="h-4 w-4" />
+        </Button>
+      </div>
+    </nav>
   );
 }
 
