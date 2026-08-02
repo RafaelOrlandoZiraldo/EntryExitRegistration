@@ -266,6 +266,7 @@ export function TransactionsPage({
           <FinancialDashboard
             expenseDistribution={dashboardData.expenseDistribution}
             summary={dashboardData.summary}
+            transactions={visibleTransactions}
           />
 
           {state.transactions.length === 0 ? (
