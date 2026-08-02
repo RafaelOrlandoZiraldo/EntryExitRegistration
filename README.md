@@ -34,7 +34,7 @@ cp .env.example .env.local
 Variables:
 
 ```env
-VITE_DATA_SOURCE=opfs
+VITE_DATA_SOURCE=api
 VITE_AUTH_USERNAME=admin
 VITE_AUTH_PASSWORD_HASH=
 VITE_AUTH_PASSWORD_SALT=
@@ -80,6 +80,17 @@ variables de entorno de Cloudflare Pages.
 ```bash
 npm install
 npm run dev
+```
+
+Con `VITE_DATA_SOURCE=api`, el dev server de Vite expone endpoints locales
+`/api/*` compatibles con las Cloudflare Pages Functions. Los datos locales se
+guardan en `.local-data/domestic-finance-api.json`, archivo ignorado por Git.
+
+Credenciales locales configuradas actualmente:
+
+```text
+Usuario: admin
+Contrasena: correct-password
 ```
 
 ## Calidad

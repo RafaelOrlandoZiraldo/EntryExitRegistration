@@ -28,6 +28,7 @@
     "eslint.config.js",
     "tailwind.config.ts",
     "postcss.config.js",
+    "scripts/**/*.ts",
     "tests/e2e/**/*.ts",
     "functions/**/*.ts"
   ]

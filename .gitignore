@@ -42,6 +42,9 @@ tmp/
 temp/
 *.tmp
 
+# Local API data
+.local-data/
+
 # Local agent/project-generation instructions
 AGENT.md
 skills/

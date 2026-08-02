@@ -1,13 +1,8 @@
 import { expect, test } from "@playwright/test";
 
 test("user can create edit and delete a transaction", async ({ page }) => {
+  await page.request.delete("/api/test/reset");
   await page.goto("/login");
-  await page.evaluate(async () => {
-    const root = await navigator.storage.getDirectory();
-    await root.removeEntry("domestic-finance.json").catch(() => undefined);
-    await root.removeEntry("domestic-finance.json.tmp").catch(() => undefined);
-  });
-  await page.reload();
 
   await page.getByLabel("Usuario").fill("admin");
   await page.getByLabel("Contrasena").fill("correct-password");
