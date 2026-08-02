@@ -1,4 +1,7 @@
-import { verifyPassword } from "../../_shared/auth";
+import {
+  diagnosePasswordVerification,
+  verifyPassword
+} from "../../_shared/auth";
 import { jsonResponse, readJson } from "../../_shared/http";
 import type { Env, PagesContext } from "../../_shared/types";
 
@@ -85,9 +88,15 @@ export async function onRequestPost({ request, env }: PagesContext) {
     return jsonResponse({ error: "Invalid request." }, { status: 400 });
   }
 
+  const diagnostics = await diagnosePasswordVerification(
+    diagnosticsEnv,
+    body.password
+  );
+
   return jsonResponse({
     passwordLength: body.password.length,
-    passwordMatches: await verifyPassword(diagnosticsEnv, body.password)
+    passwordMatches: await verifyPassword(diagnosticsEnv, body.password),
+    ...diagnostics
   });
 }
 

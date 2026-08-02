@@ -30,23 +30,7 @@ export async function verifyPassword(env: Env, password: string) {
   }
 
   try {
-    const passwordKey = await crypto.subtle.importKey(
-      "raw",
-      new TextEncoder().encode(password),
-      "PBKDF2",
-      false,
-      ["deriveBits"]
-    );
-    const derivedBits = await crypto.subtle.deriveBits(
-      {
-        name: "PBKDF2",
-        hash: "SHA-256",
-        salt: base64ToBytes(env.AUTH_PASSWORD_SALT),
-        iterations: Number(env.AUTH_PASSWORD_ITERATIONS)
-      },
-      passwordKey,
-      256
-    );
+    const derivedBits = await derivePasswordBits(env, password);
 
     return constantTimeEqual(
       new Uint8Array(derivedBits),
@@ -54,6 +38,27 @@ export async function verifyPassword(env: Env, password: string) {
     );
   } catch {
     return false;
+  }
+}
+
+export async function diagnosePasswordVerification(env: Env, password: string) {
+  try {
+    const derivedBits = await derivePasswordBits(env, password);
+    const derivedBytes = new Uint8Array(derivedBits);
+
+    return {
+      deriveSucceeded: true,
+      derivedByteLength: derivedBytes.byteLength,
+      derivedFingerprint: await fingerprintBytes(derivedBytes),
+      errorName: null
+    };
+  } catch (error) {
+    return {
+      deriveSucceeded: false,
+      derivedByteLength: null,
+      derivedFingerprint: null,
+      errorName: error instanceof Error ? error.name : "UnknownError"
+    };
   }
 }
 
@@ -157,6 +162,43 @@ function readBase64Bytes(value: string | undefined) {
   } catch {
     return null;
   }
+}
+
+async function derivePasswordBits(env: Env, password: string) {
+  const passwordKey = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(password),
+    "PBKDF2",
+    false,
+    ["deriveBits"]
+  );
+
+  return crypto.subtle.deriveBits(
+    {
+      name: "PBKDF2",
+      hash: "SHA-256",
+      salt: toArrayBuffer(base64ToBytes(env.AUTH_PASSWORD_SALT)),
+      iterations: Number(env.AUTH_PASSWORD_ITERATIONS)
+    },
+    passwordKey,
+    256
+  );
+}
+
+async function fingerprintBytes(bytes: Uint8Array) {
+  const digest = await crypto.subtle.digest("SHA-256", toArrayBuffer(bytes));
+
+  return Array.from(new Uint8Array(digest))
+    .slice(0, 8)
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+function toArrayBuffer(bytes: Uint8Array) {
+  const copy = new Uint8Array(bytes.byteLength);
+  copy.set(bytes);
+
+  return copy.buffer;
 }
 
 function bytesToBase64Url(bytes: Uint8Array) {
