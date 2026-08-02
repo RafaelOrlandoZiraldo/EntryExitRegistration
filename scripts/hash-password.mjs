@@ -1,4 +1,4 @@
-import { randomBytes, webcrypto } from "node:crypto";
+import { createHash, randomBytes, webcrypto } from "node:crypto";
 
 const password = process.argv[2];
 
@@ -18,6 +18,7 @@ if (!Number.isInteger(iterations) || iterations <= 0) {
 }
 
 const salt = randomBytes(16);
+const cloudflareHash = createHash("sha256").update(salt).update(password).digest();
 const passwordKey = await webcrypto.subtle.importKey(
   "raw",
   new TextEncoder().encode(password),
@@ -41,3 +42,9 @@ console.log(
   `VITE_AUTH_PASSWORD_HASH=${Buffer.from(derivedBits).toString("base64")}`
 );
 console.log(`VITE_AUTH_PASSWORD_ITERATIONS=${iterations}`);
+console.log("");
+console.log("Cloudflare Pages Functions:");
+console.log("AUTH_PASSWORD_ALGORITHM=sha256");
+console.log(`AUTH_PASSWORD_SALT=${salt.toString("base64")}`);
+console.log(`AUTH_PASSWORD_HASH=${cloudflareHash.toString("base64")}`);
+console.log(`AUTH_PASSWORD_ITERATIONS=${iterations}`);

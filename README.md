@@ -52,6 +52,7 @@ sin prefijo `VITE_` en Cloudflare:
 
 ```env
 AUTH_USERNAME=admin
+AUTH_PASSWORD_ALGORITHM=sha256
 AUTH_PASSWORD_HASH=
 AUTH_PASSWORD_SALT=
 AUTH_PASSWORD_ITERATIONS=310000
@@ -60,7 +61,8 @@ SESSION_SECRET=
 ```
 
 `AUTH_PASSWORD_HASH`, `AUTH_PASSWORD_SALT` y `SESSION_SECRET` pueden cargarse
-como secretos. `AUTH_USERNAME`, `AUTH_PASSWORD_ITERATIONS` y
+como secretos. `AUTH_USERNAME`, `AUTH_PASSWORD_ALGORITHM`,
+`AUTH_PASSWORD_ITERATIONS` y
 `SESSION_TIMEOUT_MINUTES` pueden ser plaintext. Las variables `VITE_*` no son
 secretas porque quedan publicadas en los archivos del sitio.
 

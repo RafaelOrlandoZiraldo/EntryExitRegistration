@@ -42,6 +42,7 @@ navegador. La validacion la hacen las Functions con estas variables sin prefijo
 
 ```text
 AUTH_USERNAME
+AUTH_PASSWORD_ALGORITHM
 AUTH_PASSWORD_HASH
 AUTH_PASSWORD_SALT
 AUTH_PASSWORD_ITERATIONS

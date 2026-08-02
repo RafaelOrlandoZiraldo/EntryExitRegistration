@@ -4,6 +4,7 @@ export interface Env {
   AUTH_PASSWORD_HASH: string;
   AUTH_PASSWORD_SALT: string;
   AUTH_PASSWORD_ITERATIONS: string;
+  AUTH_PASSWORD_ALGORITHM?: string;
   SESSION_SECRET: string;
   SESSION_TIMEOUT_MINUTES: string;
 }

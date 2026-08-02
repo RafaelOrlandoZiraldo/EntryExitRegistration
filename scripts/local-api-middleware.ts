@@ -8,6 +8,7 @@ interface LocalApiEnv {
   AUTH_PASSWORD_HASH?: string;
   AUTH_PASSWORD_SALT?: string;
   AUTH_PASSWORD_ITERATIONS?: string;
+  AUTH_PASSWORD_ALGORITHM?: string;
   SESSION_SECRET?: string;
   SESSION_TIMEOUT_MINUTES?: string;
   LOCAL_API_DATA_FILE?: string;
@@ -330,6 +331,7 @@ function createEmptyState(): LocalApiState {
 function validateAuthConfig(env: LocalApiEnv) {
   const hash = readBase64Bytes(env.AUTH_PASSWORD_HASH);
   const salt = readBase64Bytes(env.AUTH_PASSWORD_SALT);
+  const algorithm = getPasswordAlgorithm(env);
 
   return Boolean(
     env.AUTH_USERNAME &&
@@ -344,7 +346,8 @@ function validateAuthConfig(env: LocalApiEnv) {
       hash !== null &&
       hash.byteLength === 32 &&
       salt !== null &&
-      salt.byteLength > 0
+      salt.byteLength > 0 &&
+      algorithm !== null
   );
 }
 
@@ -360,18 +363,27 @@ function verifyPassword(env: LocalApiEnv, password: string) {
     return false;
   }
 
-  const actual = crypto.pbkdf2Sync(
-    password,
-    salt,
-    Number(env.AUTH_PASSWORD_ITERATIONS),
-    32,
-    "sha256"
-  );
+  const actual =
+    getPasswordAlgorithm(env) === "pbkdf2"
+      ? crypto.pbkdf2Sync(
+          password,
+          salt,
+          Number(env.AUTH_PASSWORD_ITERATIONS),
+          32,
+          "sha256"
+        )
+      : crypto.createHash("sha256").update(salt).update(password).digest();
 
   return (
     actual.byteLength === expected.byteLength &&
     crypto.timingSafeEqual(actual, expected)
   );
+}
+
+function getPasswordAlgorithm(env: LocalApiEnv) {
+  const algorithm = env.AUTH_PASSWORD_ALGORITHM ?? "sha256";
+
+  return algorithm === "sha256" || algorithm === "pbkdf2" ? algorithm : null;
 }
 
 function createSessionCookie(env: LocalApiEnv, secure: boolean) {

@@ -6,6 +6,7 @@ const sessionCookieName = "domestic_finance_session";
 export function validateAuthConfig(env: Env) {
   const passwordHash = readBase64Bytes(env.AUTH_PASSWORD_HASH);
   const passwordSalt = readBase64Bytes(env.AUTH_PASSWORD_SALT);
+  const algorithm = getPasswordAlgorithm(env);
 
   return (
     env.AUTH_USERNAME &&
@@ -20,7 +21,8 @@ export function validateAuthConfig(env: Env) {
     passwordHash !== null &&
     passwordHash.byteLength === 32 &&
     passwordSalt !== null &&
-    passwordSalt.byteLength > 0
+    passwordSalt.byteLength > 0 &&
+    algorithm !== null
   );
 }
 
@@ -30,10 +32,10 @@ export async function verifyPassword(env: Env, password: string) {
   }
 
   try {
-    const derivedBits = await derivePasswordBits(env, password);
+    const derivedBytes = await derivePasswordBytes(env, password);
 
     return constantTimeEqual(
-      new Uint8Array(derivedBits),
+      derivedBytes,
       base64ToBytes(env.AUTH_PASSWORD_HASH)
     );
   } catch {
@@ -43,8 +45,7 @@ export async function verifyPassword(env: Env, password: string) {
 
 export async function diagnosePasswordVerification(env: Env, password: string) {
   try {
-    const derivedBits = await derivePasswordBits(env, password);
-    const derivedBytes = new Uint8Array(derivedBits);
+    const derivedBytes = await derivePasswordBytes(env, password);
 
     return {
       deriveSucceeded: true,
@@ -164,7 +165,34 @@ function readBase64Bytes(value: string | undefined) {
   }
 }
 
-async function derivePasswordBits(env: Env, password: string) {
+async function derivePasswordBytes(env: Env, password: string) {
+  const algorithm = getPasswordAlgorithm(env);
+
+  if (algorithm === "sha256") {
+    return deriveSaltedSha256Bytes(env, password);
+  }
+
+  if (algorithm === "pbkdf2") {
+    return derivePbkdf2Bytes(env, password);
+  }
+
+  throw new Error("Unsupported password algorithm.");
+}
+
+async function deriveSaltedSha256Bytes(env: Env, password: string) {
+  const salt = base64ToBytes(env.AUTH_PASSWORD_SALT);
+  const passwordBytes = new TextEncoder().encode(password);
+  const input = new Uint8Array(salt.byteLength + passwordBytes.byteLength);
+
+  input.set(salt);
+  input.set(passwordBytes, salt.byteLength);
+
+  const digest = await crypto.subtle.digest("SHA-256", toArrayBuffer(input));
+
+  return new Uint8Array(digest);
+}
+
+async function derivePbkdf2Bytes(env: Env, password: string) {
   const passwordKey = await crypto.subtle.importKey(
     "raw",
     new TextEncoder().encode(password),
@@ -173,7 +201,7 @@ async function derivePasswordBits(env: Env, password: string) {
     ["deriveBits"]
   );
 
-  return crypto.subtle.deriveBits(
+  const bits = await crypto.subtle.deriveBits(
     {
       name: "PBKDF2",
       hash: "SHA-256",
@@ -183,6 +211,14 @@ async function derivePasswordBits(env: Env, password: string) {
     passwordKey,
     256
   );
+
+  return new Uint8Array(bits);
+}
+
+function getPasswordAlgorithm(env: Env) {
+  const algorithm = env.AUTH_PASSWORD_ALGORITHM ?? "sha256";
+
+  return algorithm === "sha256" || algorithm === "pbkdf2" ? algorithm : null;
 }
 
 async function fingerprintBytes(bytes: Uint8Array) {
