@@ -1,4 +1,5 @@
-import { jsonResponse } from "../../_shared/http";
+import { verifyPassword } from "../../_shared/auth";
+import { jsonResponse, readJson } from "../../_shared/http";
 import type { Env, PagesContext } from "../../_shared/types";
 
 interface DiagnosticsEnv extends Env {
@@ -56,6 +57,37 @@ export async function onRequestGet({ request, env }: PagesContext) {
       Number.isInteger(timeoutMinutes) &&
       timeoutMinutes > 0 &&
       Boolean(diagnosticsEnv.SESSION_SECRET)
+  });
+}
+
+export async function onRequestPost({ request, env }: PagesContext) {
+  const diagnosticsEnv = env as DiagnosticsEnv;
+
+  if (!diagnosticsEnv.DIAGNOSTICS_TOKEN) {
+    return jsonResponse({ error: "Not found." }, { status: 404 });
+  }
+
+  if (
+    request.headers.get("x-diagnostics-token") !==
+    diagnosticsEnv.DIAGNOSTICS_TOKEN
+  ) {
+    return jsonResponse({ error: "Unauthorized." }, { status: 401 });
+  }
+
+  const body = await readJson(request);
+
+  if (
+    typeof body !== "object" ||
+    body === null ||
+    !("password" in body) ||
+    typeof body.password !== "string"
+  ) {
+    return jsonResponse({ error: "Invalid request." }, { status: 400 });
+  }
+
+  return jsonResponse({
+    passwordLength: body.password.length,
+    passwordMatches: await verifyPassword(diagnosticsEnv, body.password)
   });
 }
 
