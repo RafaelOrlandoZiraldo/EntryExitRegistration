@@ -4,6 +4,9 @@ import { jsonResponse } from "./http";
 const sessionCookieName = "domestic_finance_session";
 
 export function validateAuthConfig(env: Env) {
+  const passwordHash = readBase64Bytes(env.AUTH_PASSWORD_HASH);
+  const passwordSalt = readBase64Bytes(env.AUTH_PASSWORD_SALT);
+
   return (
     env.AUTH_USERNAME &&
     env.AUTH_PASSWORD_HASH &&
@@ -13,7 +16,11 @@ export function validateAuthConfig(env: Env) {
     Number.isInteger(Number(env.AUTH_PASSWORD_ITERATIONS)) &&
     Number(env.AUTH_PASSWORD_ITERATIONS) > 0 &&
     Number.isInteger(Number(env.SESSION_TIMEOUT_MINUTES)) &&
-    Number(env.SESSION_TIMEOUT_MINUTES) > 0
+    Number(env.SESSION_TIMEOUT_MINUTES) > 0 &&
+    passwordHash !== null &&
+    passwordHash.byteLength === 32 &&
+    passwordSalt !== null &&
+    passwordSalt.byteLength > 0
   );
 }
 
@@ -22,28 +29,32 @@ export async function verifyPassword(env: Env, password: string) {
     return false;
   }
 
-  const passwordKey = await crypto.subtle.importKey(
-    "raw",
-    new TextEncoder().encode(password),
-    "PBKDF2",
-    false,
-    ["deriveBits"]
-  );
-  const derivedBits = await crypto.subtle.deriveBits(
-    {
-      name: "PBKDF2",
-      hash: "SHA-256",
-      salt: base64ToBytes(env.AUTH_PASSWORD_SALT),
-      iterations: Number(env.AUTH_PASSWORD_ITERATIONS)
-    },
-    passwordKey,
-    256
-  );
+  try {
+    const passwordKey = await crypto.subtle.importKey(
+      "raw",
+      new TextEncoder().encode(password),
+      "PBKDF2",
+      false,
+      ["deriveBits"]
+    );
+    const derivedBits = await crypto.subtle.deriveBits(
+      {
+        name: "PBKDF2",
+        hash: "SHA-256",
+        salt: base64ToBytes(env.AUTH_PASSWORD_SALT),
+        iterations: Number(env.AUTH_PASSWORD_ITERATIONS)
+      },
+      passwordKey,
+      256
+    );
 
-  return constantTimeEqual(
-    new Uint8Array(derivedBits),
-    base64ToBytes(env.AUTH_PASSWORD_HASH)
-  );
+    return constantTimeEqual(
+      new Uint8Array(derivedBits),
+      base64ToBytes(env.AUTH_PASSWORD_HASH)
+    );
+  } catch {
+    return false;
+  }
 }
 
 export async function createSessionCookie(env: Env) {
@@ -134,6 +145,18 @@ function base64ToBytes(value: string) {
   }
 
   return bytes;
+}
+
+function readBase64Bytes(value: string | undefined) {
+  if (!value) {
+    return null;
+  }
+
+  try {
+    return base64ToBytes(value);
+  } catch {
+    return null;
+  }
 }
 
 function bytesToBase64Url(bytes: Uint8Array) {
