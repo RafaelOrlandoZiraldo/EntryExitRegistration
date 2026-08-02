@@ -1,10 +1,6 @@
 import {
-  VerifyPasswordUseCase,
-  type AuthConfig,
-  type PasswordVerifier,
-  type SessionService
-} from "@application/auth";
-import {
+  ApiAuthClient,
+  LocalAuthClient,
   readAuthConfigFromEnv,
   SessionStorageSessionService,
   SystemEpochClock,
@@ -12,14 +8,30 @@ import {
 } from "@infrastructure/auth";
 import type { AuthProviderProps } from "@features/auth";
 
+const dataSource = import.meta.env.VITE_DATA_SOURCE;
+const useApiBackend = dataSource === "api";
+
 export function createBrowserAuthDependencies(): AuthProviderProps["dependencies"] {
-  return {
-    config: readAuthConfigFromEnv(),
+  if (useApiBackend) {
+    return {
+      authClient: new ApiAuthClient(),
+      isConfigurationValid: true
+    };
+  }
+
+  const config = readAuthConfigFromEnv();
+  const authClient = new LocalAuthClient({
+    config,
     passwordVerifier: new WebCryptoPasswordVerifier(),
     sessionService: new SessionStorageSessionService(
       window.sessionStorage,
       new SystemEpochClock()
     )
+  });
+
+  return {
+    authClient,
+    isConfigurationValid: config !== null
   };
 }
 
@@ -27,14 +39,9 @@ const browserAuthDependencies = createBrowserAuthDependencies();
 
 export const authServices = {
   dependencies: browserAuthDependencies,
-  verifyPassword: new VerifyPasswordUseCase({
-    config: browserAuthDependencies.config,
-    passwordVerifier: browserAuthDependencies.passwordVerifier
-  })
-};
-
-export type BrowserAuthDependencies = {
-  config: AuthConfig | null;
-  passwordVerifier: PasswordVerifier;
-  sessionService: SessionService;
+  verifyPassword: {
+    execute(password: string) {
+      return browserAuthDependencies.authClient.verifyPassword(password);
+    }
+  }
 };

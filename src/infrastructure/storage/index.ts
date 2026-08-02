@@ -1,3 +1,4 @@
+export * from "./HttpTransactionRepository";
 export * from "./errors";
 export * from "./InMemoryTextFileAdapter";
 export * from "./OpfsBackupRepository";

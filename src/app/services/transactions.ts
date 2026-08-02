@@ -7,11 +7,14 @@ import {
   GetTransactions,
   ImportStorageDocument,
   PreviewImportStorageDocument,
-  UpdateTransaction
+  UpdateTransaction,
+  type CreateDailyBackupInput,
+  type CreateDailyBackupResult
 } from "@application/use-cases";
 import {
   BrowserFileDownloadAdapter,
   BrowserIdGenerator,
+  HttpTransactionRepository,
   OpfsBackupRepository,
   OpfsTextFileAdapter,
   OpfsTransactionRepository,
@@ -19,18 +22,23 @@ import {
 } from "@infrastructure/index";
 
 const clock = new SystemIsoClock();
-const textFileAdapter = new OpfsTextFileAdapter();
-const transactionRepository = new OpfsTransactionRepository(
-  textFileAdapter,
-  clock
-);
-const backupRepository = new OpfsBackupRepository(textFileAdapter);
+const useApiBackend = import.meta.env.VITE_DATA_SOURCE === "api";
+
+const localTextFileAdapter = useApiBackend ? null : new OpfsTextFileAdapter();
+const transactionRepository = useApiBackend
+  ? new HttpTransactionRepository()
+  : new OpfsTransactionRepository(localTextFileAdapter, clock);
+const backupRepository = localTextFileAdapter
+  ? new OpfsBackupRepository(localTextFileAdapter)
+  : null;
 
 export const transactionServices = {
-  createDailyBackup: new CreateDailyBackup({
-    backupRepository,
-    transactionRepository
-  }),
+  createDailyBackup: useApiBackend
+    ? new HttpDailyBackupUseCase()
+    : new CreateDailyBackup({
+        backupRepository,
+        transactionRepository
+      }),
   getTransactions: new GetTransactions({
     repository: transactionRepository
   }),
@@ -59,3 +67,24 @@ export const transactionServices = {
   }),
   downloadFile: new BrowserFileDownloadAdapter()
 };
+
+class HttpDailyBackupUseCase {
+  async execute(
+    input: CreateDailyBackupInput
+  ): Promise<CreateDailyBackupResult> {
+    const response = await fetch("/api/backups/daily", {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(input)
+    });
+
+    if (!response.ok) {
+      throw new Error("Daily backup request failed.");
+    }
+
+    return (await response.json()) as CreateDailyBackupResult;
+  }
+}

@@ -54,7 +54,7 @@ export function DeleteAllTransactionsDialog({
       await onDeleteAll();
       await onSuccess();
       setPassword("");
-      onOpenChange(false);
+      handleOpenChange(false);
     } catch (error) {
       setPassword("");
       setSubmitError(mapError(error).message);
@@ -63,8 +63,18 @@ export function DeleteAllTransactionsDialog({
     }
   };
 
+  const handleOpenChange = (nextOpen: boolean) => {
+    if (!nextOpen) {
+      setPassword("");
+      setSubmitError(null);
+      setIsDeleting(false);
+    }
+
+    onOpenChange(nextOpen);
+  };
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={handleOpenChange}>
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Eliminar todos los movimientos</DialogTitle>
@@ -110,6 +120,7 @@ export function DeleteAllTransactionsDialog({
               value={password}
               onChange={(event) => {
                 setPassword(event.target.value);
+                setSubmitError(null);
               }}
             />
           </div>
@@ -122,7 +133,7 @@ export function DeleteAllTransactionsDialog({
               type="button"
               variant="outline"
               onClick={() => {
-                onOpenChange(false);
+                handleOpenChange(false);
               }}
             >
               Cancelar

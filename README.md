@@ -1,7 +1,8 @@
 # Registro domestico de ingresos y egresos
 
 MVP web desarrollado con React, TypeScript y Vite para registrar ingresos y
-egresos domesticos sin backend ni base de datos.
+egresos domesticos. Puede usar OPFS local del navegador o Cloudflare Pages
+Functions con D1 para sincronizar datos entre dispositivos.
 
 ## Arquitectura
 
@@ -33,16 +34,35 @@ cp .env.example .env.local
 Variables:
 
 ```env
+VITE_DATA_SOURCE=opfs
 VITE_AUTH_USERNAME=admin
 VITE_AUTH_PASSWORD_HASH=
 VITE_AUTH_PASSWORD_SALT=
 VITE_AUTH_PASSWORD_ITERATIONS=310000
-VITE_SESSION_TIMEOUT_MINUTES=30
+VITE_SESSION_TIMEOUT_MINUTES=60
 ```
 
 Las variables `VITE_*` se integran al bundle y son visibles para el cliente. Esta
 autenticacion es un bloqueo local para el MVP, no una frontera de seguridad
 equivalente a un backend.
+
+Con `VITE_DATA_SOURCE=api`, la UI usa `/api/*` y la autenticacion se valida en
+Cloudflare Pages Functions. En ese modo, configurar estas variables del backend
+sin prefijo `VITE_` en Cloudflare:
+
+```env
+AUTH_USERNAME=admin
+AUTH_PASSWORD_HASH=
+AUTH_PASSWORD_SALT=
+AUTH_PASSWORD_ITERATIONS=310000
+SESSION_TIMEOUT_MINUTES=60
+SESSION_SECRET=
+```
+
+`AUTH_PASSWORD_HASH`, `AUTH_PASSWORD_SALT` y `SESSION_SECRET` pueden cargarse
+como secretos. `AUTH_USERNAME`, `AUTH_PASSWORD_ITERATIONS` y
+`SESSION_TIMEOUT_MINUTES` pueden ser plaintext. Las variables `VITE_*` no son
+secretas porque quedan publicadas en los archivos del sitio.
 
 ## Generar hash de contrasena
 
@@ -74,7 +94,7 @@ npm run build
 
 ## Persistencia
 
-El documento `domestic-finance.json` se administra mediante OPFS. No es un
+En modo local, el documento `domestic-finance.json` se administra mediante OPFS. No es un
 archivo visible en una carpeta normal del equipo.
 
 Consecuencias:
@@ -97,6 +117,9 @@ El backup se intenta crear al abrir la aplicacion y luego una vez por dia a la
 medianoche local mientras la app permanezca abierta. Si la app esta cerrada a
 medianoche, el backup faltante del dia se crea al volver a abrirla.
 
+En modo `api`, los movimientos se guardan en Cloudflare D1. Las copias diarias
+se registran en la tabla `daily_backups`.
+
 ## Cloudflare Pages
 
 Configuracion recomendada:
@@ -117,11 +140,29 @@ Variables de entorno:
 1. Abrir Workers & Pages.
 2. Seleccionar el proyecto.
 3. Abrir Settings > Environment variables.
-4. Cargar las variables `VITE_AUTH_*` para Production.
-5. Definir valores diferentes para Preview si se requiere probar autenticacion.
+4. Cargar `VITE_DATA_SOURCE=api` para Production.
+5. Cargar las variables `AUTH_*`, `SESSION_TIMEOUT_MINUTES` y `SESSION_SECRET`
+   para las Functions.
+6. Definir valores diferentes para Preview si se requiere probar autenticacion.
 
-Cloudflare ejecuta el build y Vite incorpora esas variables en los assets
-estaticos.
+Cloudflare ejecuta el build y Vite incorpora solo las variables `VITE_*` en los
+assets estaticos.
+
+### Base de datos D1
+
+Crear una base D1 y vincularla al proyecto Pages con el binding:
+
+```text
+DB
+```
+
+Aplicar la migracion:
+
+```text
+migrations/0001_create_transactions.sql
+```
+
+No se agregan Workers, KV, R2 ni Pages Functions separadas del proyecto Pages.
 
 ### Routing SPA
 
@@ -143,8 +184,8 @@ remotas, analytics o nuevos origenes.
 ### Dominio personalizado
 
 Al mover la aplicacion de `*.pages.dev` a un dominio personalizado, OPFS comienza
-vacio porque cambia el origen. Exportar desde el origen anterior e importar en el
-nuevo.
+vacio porque cambia el origen. En modo `api`, los datos compartidos viven en D1
+y no dependen del navegador.
 
 ## Datos corruptos
 

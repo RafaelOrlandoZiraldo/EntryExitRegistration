@@ -1,5 +1,8 @@
 import { useEffect } from "react";
-import type { CreateDailyBackup } from "@application/use-cases";
+import type {
+  CreateDailyBackupInput,
+  CreateDailyBackupResult
+} from "@application/use-cases";
 import { reportDevelopmentError } from "@app/errors/diagnostics";
 import {
   formatLocalDate,
@@ -7,7 +10,9 @@ import {
 } from "./dailyBackupSchedule";
 
 export interface DailyBackupRunnerProps {
-  createDailyBackupUseCase: CreateDailyBackup;
+  createDailyBackupUseCase: {
+    execute(input: CreateDailyBackupInput): Promise<CreateDailyBackupResult>;
+  };
 }
 
 export function DailyBackupRunner({

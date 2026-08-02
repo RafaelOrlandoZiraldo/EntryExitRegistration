@@ -10,3 +10,11 @@ export interface SessionService {
   touch(timeoutMinutes: number): AuthSession | null;
   clear(): void;
 }
+
+export interface AuthClient {
+  getCurrent(): Promise<AuthSession | null>;
+  login(input: { username: string; password: string }): Promise<AuthSession>;
+  logout(): Promise<void>;
+  refreshSession(): Promise<AuthSession | null>;
+  verifyPassword(password: string): Promise<void>;
+}

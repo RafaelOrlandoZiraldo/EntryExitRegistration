@@ -1,26 +1,20 @@
 import React from "react";
-import {
-  AuthenticationConfigurationError,
-  LoginUseCase,
-  type AuthConfig,
-  type AuthSession,
-  type PasswordVerifier,
-  type SessionService
-} from "@application/auth";
+import type { AuthClient, AuthSession } from "@application/auth";
+import { LoadingState } from "@shared/ui";
 
 interface AuthContextValue {
   session: AuthSession | null;
   isAuthenticated: boolean;
   isConfigurationValid: boolean;
+  isInitializing: boolean;
   login(input: { username: string; password: string }): Promise<void>;
-  logout(): void;
-  refreshSession(): void;
+  logout(): Promise<void>;
+  refreshSession(): Promise<void>;
 }
 
 interface AuthProviderDependencies {
-  config: AuthConfig | null;
-  passwordVerifier: PasswordVerifier;
-  sessionService: SessionService;
+  authClient: AuthClient;
+  isConfigurationValid: boolean;
 }
 
 const AuthContext = React.createContext<AuthContextValue | null>(null);
@@ -32,36 +26,55 @@ export interface AuthProviderProps {
 
 export function AuthProvider({ children, dependencies }: AuthProviderProps) {
   const authDependencies = React.useMemo(() => dependencies, [dependencies]);
-  const [session, setSession] = React.useState<AuthSession | null>(() =>
-    authDependencies.config === null
-      ? null
-      : authDependencies.sessionService.getCurrent()
+  const [session, setSession] = React.useState<AuthSession | null>(null);
+  const [isInitializing, setIsInitializing] = React.useState(true);
+  const [isConfigurationValid, setIsConfigurationValid] = React.useState(
+    authDependencies.isConfigurationValid
   );
-  const isConfigurationValid = authDependencies.config !== null;
 
-  const refreshSession = React.useCallback(() => {
-    const config = authDependencies.config;
+  React.useEffect(() => {
+    let isMounted = true;
 
-    if (config === null) {
-      setSession(null);
-      return;
-    }
+    authDependencies.authClient
+      .getCurrent()
+      .then((nextSession) => {
+        if (isMounted) {
+          setSession(nextSession);
+          setIsConfigurationValid(authDependencies.isConfigurationValid);
+        }
+      })
+      .catch(() => {
+        if (isMounted) {
+          setSession(null);
+          setIsConfigurationValid(false);
+        }
+      })
+      .finally(() => {
+        if (isMounted) {
+          setIsInitializing(false);
+        }
+      });
 
-    setSession(
-      authDependencies.sessionService.touch(config.sessionTimeoutMinutes)
-    );
+    return () => {
+      isMounted = false;
+    };
+  }, [authDependencies]);
+
+  const refreshSession = React.useCallback(async () => {
+    const nextSession = await authDependencies.authClient.refreshSession();
+    setSession(nextSession);
   }, [authDependencies]);
 
   React.useEffect(() => {
-    if (session === null || authDependencies.config === null) {
+    if (session === null || !isConfigurationValid) {
       return undefined;
     }
 
     const checkSession = () => {
-      setSession(authDependencies.sessionService.getCurrent());
+      void authDependencies.authClient.getCurrent().then(setSession);
     };
     const refreshOnActivity = () => {
-      refreshSession();
+      void refreshSession();
     };
     const intervalId = window.setInterval(checkSession, 5_000);
 
@@ -75,24 +88,20 @@ export function AuthProvider({ children, dependencies }: AuthProviderProps) {
       window.removeEventListener("keydown", refreshOnActivity);
       window.removeEventListener("focus", refreshOnActivity);
     };
-  }, [authDependencies, refreshSession, session]);
+  }, [authDependencies, isConfigurationValid, refreshSession, session]);
 
   const login = React.useCallback(
     async (input: { username: string; password: string }) => {
-      if (authDependencies.config === null) {
-        throw new AuthenticationConfigurationError();
-      }
+      const nextSession = await authDependencies.authClient.login(input);
 
-      const useCase = new LoginUseCase(authDependencies);
-      const nextSession = await useCase.execute(input);
-
+      setIsConfigurationValid(true);
       setSession(nextSession);
     },
     [authDependencies]
   );
 
-  const logout = React.useCallback(() => {
-    authDependencies.sessionService.clear();
+  const logout = React.useCallback(async () => {
+    await authDependencies.authClient.logout();
     setSession(null);
   }, [authDependencies]);
 
@@ -101,12 +110,17 @@ export function AuthProvider({ children, dependencies }: AuthProviderProps) {
       session,
       isAuthenticated: session !== null,
       isConfigurationValid,
+      isInitializing,
       login,
       logout,
       refreshSession
     }),
-    [isConfigurationValid, login, logout, refreshSession, session]
+    [isConfigurationValid, isInitializing, login, logout, refreshSession, session]
   );
+
+  if (isInitializing) {
+    return <LoadingState label="Validando sesion..." />;
+  }
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

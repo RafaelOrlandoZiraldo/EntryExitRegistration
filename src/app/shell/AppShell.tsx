@@ -39,7 +39,7 @@ export function AppShell() {
               type="button"
               variant="ghost"
               onClick={() => {
-                auth.logout();
+                void auth.logout();
               }}
             >
               <LogOut aria-hidden="true" className="h-5 w-5" />
