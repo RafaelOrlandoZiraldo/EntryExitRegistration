@@ -24,6 +24,27 @@ import {
 const clock = new SystemIsoClock();
 const useApiBackend = import.meta.env.VITE_DATA_SOURCE === "api";
 
+class HttpDailyBackupUseCase {
+  async execute(
+    input: CreateDailyBackupInput
+  ): Promise<CreateDailyBackupResult> {
+    const response = await fetch("/api/backups/daily", {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(input)
+    });
+
+    if (!response.ok) {
+      throw new Error("Daily backup request failed.");
+    }
+
+    return (await response.json()) as CreateDailyBackupResult;
+  }
+}
+
 const localTextFileAdapter = useApiBackend ? null : new OpfsTextFileAdapter();
 const transactionRepository = useApiBackend
   ? new HttpTransactionRepository()
@@ -67,24 +88,3 @@ export const transactionServices = {
   }),
   downloadFile: new BrowserFileDownloadAdapter()
 };
-
-class HttpDailyBackupUseCase {
-  async execute(
-    input: CreateDailyBackupInput
-  ): Promise<CreateDailyBackupResult> {
-    const response = await fetch("/api/backups/daily", {
-      method: "POST",
-      credentials: "include",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(input)
-    });
-
-    if (!response.ok) {
-      throw new Error("Daily backup request failed.");
-    }
-
-    return (await response.json()) as CreateDailyBackupResult;
-  }
-}
