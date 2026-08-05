@@ -62,7 +62,7 @@ export function BackupRestoreControls({
       downloadFile.download({
         fileName: backup.fileName,
         contents: backup.contents,
-        mimeType: "application/json"
+        mimeType: "text/csv;charset=utf-8"
       });
     } catch (error) {
       const message = mapError(error);
@@ -117,7 +117,7 @@ export function BackupRestoreControls({
         downloadFile.download({
           fileName: backup.fileName,
           contents: backup.contents,
-          mimeType: "application/json"
+          mimeType: "text/csv;charset=utf-8"
         });
       }
 
@@ -145,21 +145,21 @@ export function BackupRestoreControls({
             onClick={() => void exportCurrentData()}
           >
             <Download aria-hidden="true" className="mr-2 h-4 w-4" />
-            Exportar JSON
+            Exportar Excel
           </Button>
         ) : null}
         <Button type="button" variant="outline" onClick={selectImportFile}>
           <Upload aria-hidden="true" className="mr-2 h-4 w-4" />
-          Importar JSON
+          Importar Excel
         </Button>
       </div>
 
       <input
         ref={fileInputRef}
-        accept="application/json,.json"
+        accept=".csv,text/csv,application/vnd.ms-excel"
         className="sr-only"
         type="file"
-        aria-label="Seleccionar respaldo JSON"
+        aria-label="Seleccionar respaldo Excel"
         onChange={(event) => {
           const file = event.target.files?.[0];
 
@@ -181,7 +181,7 @@ export function BackupRestoreControls({
           <DialogHeader>
             <DialogTitle>Confirmar importacion</DialogTitle>
             <DialogDescription>
-              El respaldo reemplazara todos los movimientos actuales.
+              Los movimientos del archivo se agregaran a los datos actuales.
             </DialogDescription>
           </DialogHeader>
           {importState.status === "preview" || importState.status === "importing" ? (
@@ -199,8 +199,8 @@ export function BackupRestoreControls({
                 </div>
               </dl>
               <p className="text-sm text-muted-foreground">
-                La importacion reemplaza los datos guardados. No se mezclaran
-                movimientos.
+                La importacion conserva los datos guardados y agrega filas nuevas.
+                Si un identificador ya existe, se omitira para evitar duplicados.
               </p>
               <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
                 <Button
@@ -219,8 +219,8 @@ export function BackupRestoreControls({
                   onClick={() => void confirmImport()}
                 >
                   {mode === "normal"
-                    ? "Descargar respaldo y reemplazar"
-                    : "Reemplazar con respaldo importado"}
+                    ? "Descargar respaldo y agregar"
+                    : "Agregar respaldo importado"}
                 </Button>
               </div>
             </div>

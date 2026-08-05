@@ -37,7 +37,8 @@ describe("storage document use cases", () => {
     });
 
     await expect(useCase.execute()).resolves.toMatchObject({
-      fileName: "domestic-finance-2026-08-20.json",
+      fileName: "domestic-finance-2026-08-20.csv",
+      contents: expect.stringContaining("schemaVersion,1"),
       document
     });
   });
@@ -45,17 +46,42 @@ describe("storage document use cases", () => {
   it("PreviewImportStorageDocument_WhenFileIsValid_ShouldReturnVersionAndCount", () => {
     const useCase = new PreviewImportStorageDocument();
 
-    expect(useCase.execute(JSON.stringify(document))).toMatchObject({
+    expect(useCase.execute(createExcelBackup(document))).toMatchObject({
       schemaVersion: 1,
       transactionCount: 1,
       document
     });
   });
 
+  it("PreviewImportStorageDocument_WhenCsvUsesRegionalSeparator_ShouldImportSemicolonAndDecimalComma", () => {
+    const useCase = new PreviewImportStorageDocument();
+    const contents = createRegionalExcelBackup({
+      ...document,
+      transactions: [
+        {
+          ...document.transactions[0],
+          amount: 1500.5
+        }
+      ]
+    });
+
+    expect(useCase.execute(contents)).toMatchObject({
+      transactionCount: 1,
+      document: {
+        transactions: [
+          expect.objectContaining({
+            date: "2026-08-01",
+            amount: 1500.5
+          })
+        ]
+      }
+    });
+  });
+
   it("PreviewImportStorageDocument_WhenJsonIsInvalid_ShouldRejectBeforeWrite", () => {
     const useCase = new PreviewImportStorageDocument();
 
-    expect(() => useCase.execute("{bad-json")).toThrow(ImportValidationError);
+    expect(() => useCase.execute("bad-excel")).toThrow(ImportValidationError);
   });
 
   it("PreviewImportStorageDocument_WhenVersionIsUnsupported_ShouldRejectBeforeWrite", () => {
@@ -63,7 +89,7 @@ describe("storage document use cases", () => {
 
     expect(() =>
       useCase.execute(
-        JSON.stringify({
+        createExcelBackup({
           ...document,
           schemaVersion: 99
         })
@@ -71,11 +97,52 @@ describe("storage document use cases", () => {
     ).toThrow(UnsupportedImportVersionError);
   });
 
+  it("ImportStorageDocument_WhenExecuted_ShouldAppendNewTransactionsWithoutDuplicatingIds", async () => {
+    const existingTransaction: FinancialTransaction = {
+      ...document.transactions[0],
+      id: "existing-transaction",
+      description: "Existente"
+    };
+    const duplicateTransaction: FinancialTransaction = {
+      ...document.transactions[0],
+      id: "existing-transaction",
+      description: "Duplicado"
+    };
+    const newTransaction: FinancialTransaction = {
+      ...document.transactions[0],
+      id: "new-transaction",
+      description: "Nuevo"
+    };
+    const repository = createRepository({
+      ...document,
+      transactions: [existingTransaction]
+    });
+    const useCase = new ImportStorageDocument({ repository });
+
+    await expect(
+      useCase.execute(
+        createExcelBackup({
+          ...document,
+          transactions: [duplicateTransaction, newTransaction]
+        })
+      )
+    ).resolves.toMatchObject({
+      transactions: [
+        expect.objectContaining({ id: "existing-transaction" }),
+        expect.objectContaining({ id: "new-transaction" })
+      ]
+    });
+    await expect(repository.getAll()).resolves.toEqual([
+      existingTransaction,
+      newTransaction
+    ]);
+  });
+
   it("ImportStorageDocument_WhenWriteFails_ShouldPreserveCurrentData", async () => {
     const repository = createRepository(document, true);
     const useCase = new ImportStorageDocument({ repository });
 
-    await expect(useCase.execute(JSON.stringify(document))).rejects.toThrow(
+    await expect(useCase.execute(createExcelBackup(document))).rejects.toThrow(
       "write failed"
     );
     expect(await repository.getDocument()).toEqual(document);
@@ -112,6 +179,10 @@ function createRepository(
           transactions: readonly FinancialTransaction[]
         ) => readonly FinancialTransaction[]
       ) => {
+      if (failWrite) {
+        return Promise.reject(new Error("write failed"));
+      }
+
       storedDocument = {
         ...storedDocument,
         transactions: [...updater(storedDocument.transactions)]
@@ -120,4 +191,56 @@ function createRepository(
       }
     )
   };
+}
+
+function createExcelBackup(backupDocument: StorageDocument) {
+  const rows = [
+    "sep=,",
+    `schemaVersion,${backupDocument.schemaVersion}`,
+    `lastUpdatedAt,${backupDocument.lastUpdatedAt}`,
+    "",
+    "id,type,date,amount,category,description,paymentMethod,notes,createdAt,updatedAt",
+    ...backupDocument.transactions.map((transaction) =>
+      [
+        transaction.id,
+        transaction.type,
+        transaction.date,
+        transaction.amount,
+        transaction.category,
+        transaction.description,
+        transaction.paymentMethod,
+        transaction.notes ?? "",
+        transaction.createdAt,
+        transaction.updatedAt
+      ].join(",")
+    )
+  ];
+
+  return `${rows.join("\n")}\n`;
+}
+
+function createRegionalExcelBackup(backupDocument: StorageDocument) {
+  const rows = [
+    "sep=;",
+    `schemaVersion;${backupDocument.schemaVersion}`,
+    `lastUpdatedAt;${backupDocument.lastUpdatedAt}`,
+    "",
+    "id;type;date;amount;category;description;paymentMethod;notes;createdAt;updatedAt",
+    ...backupDocument.transactions.map((transaction) =>
+      [
+        transaction.id,
+        transaction.type,
+        "1/8/2026",
+        "1.500,50",
+        transaction.category,
+        transaction.description,
+        transaction.paymentMethod,
+        transaction.notes ?? "",
+        transaction.createdAt,
+        transaction.updatedAt
+      ].join(";")
+    )
+  ];
+
+  return `${rows.join("\n")}\n`;
 }
