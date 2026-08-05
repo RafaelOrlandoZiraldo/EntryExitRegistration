@@ -5,7 +5,7 @@ export interface DownloadableTextFile {
 }
 
 export class BrowserFileDownloadAdapter {
-  download({ fileName, contents, mimeType = "application/json" }: DownloadableTextFile) {
+  download({ fileName, contents, mimeType = "text/plain;charset=utf-8" }: DownloadableTextFile) {
     const blob = new Blob([contents], { type: mimeType });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
