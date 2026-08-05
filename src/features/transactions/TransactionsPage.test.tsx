@@ -2,6 +2,7 @@ import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { InvalidCredentialsError } from "@application/auth";
+import { parseImportStorageDocument } from "@application/use-cases";
 import type { StorageDocument } from "@domain/storage";
 import type { FinancialTransaction } from "@domain/transactions";
 import { TransactionsPage } from "./TransactionsPage";
@@ -455,8 +456,8 @@ describe("TransactionsPage", () => {
     const download = vi.fn();
     const exportExecute = vi.fn(() =>
       Promise.resolve({
-        fileName: "domestic-finance-2026-08-20.json",
-        contents: "{\"schemaVersion\":1}\n",
+        fileName: "domestic-finance-2026-08-20.csv",
+        contents: createExcelBackup(createStorageDocument(transactions)),
         document: createStorageDocument(transactions)
       })
     );
@@ -472,17 +473,17 @@ describe("TransactionsPage", () => {
     );
 
     await screen.findAllByText("Sueldo");
-    await user.click(screen.getByRole("button", { name: "Exportar JSON" }));
+    await user.click(screen.getByRole("button", { name: "Exportar Excel" }));
 
     expect(download).toHaveBeenCalledWith({
-      fileName: "domestic-finance-2026-08-20.json",
-      contents: "{\"schemaVersion\":1}\n",
-      mimeType: "application/json"
+      fileName: "domestic-finance-2026-08-20.csv",
+      contents: createExcelBackup(createStorageDocument(transactions)),
+      mimeType: "text/csv;charset=utf-8"
     });
     expect(execute).toHaveBeenCalledTimes(1);
   });
 
-  it("TransactionsPage_WhenValidImportIsConfirmed_ShouldBackupReplaceAndReload", async () => {
+  it("TransactionsPage_WhenValidImportIsConfirmed_ShouldBackupAppendAndReload", async () => {
     const user = userEvent.setup();
     const importedTransactions: FinancialTransaction[] = [
       {
@@ -495,7 +496,7 @@ describe("TransactionsPage", () => {
     const execute = vi
       .fn<() => Promise<FinancialTransaction[]>>()
       .mockResolvedValueOnce(transactions)
-      .mockResolvedValueOnce(importedTransactions);
+      .mockResolvedValueOnce([...transactions, ...importedTransactions]);
     const importExecute = vi.fn(() => Promise.resolve(importedDocument));
     const download = vi.fn();
     render(
@@ -509,10 +510,11 @@ describe("TransactionsPage", () => {
     );
 
     await screen.findAllByText("Sueldo");
+    const importedContents = createExcelBackup(importedDocument);
     await user.upload(
-      screen.getByLabelText("Seleccionar respaldo JSON"),
-      new File([JSON.stringify(importedDocument)], "backup.json", {
-        type: "application/json"
+      screen.getByLabelText("Seleccionar respaldo Excel"),
+      new File([importedContents], "backup.csv", {
+        type: "text/csv"
       })
     );
     expect(
@@ -521,17 +523,13 @@ describe("TransactionsPage", () => {
     expect(screen.getByText("Version")).toBeInTheDocument();
 
     await user.click(
-      screen.getByRole("button", { name: "Descargar respaldo y reemplazar" })
+      screen.getByRole("button", { name: "Descargar respaldo y agregar" })
     );
 
     expect(download).toHaveBeenCalled();
-    expect(importExecute).toHaveBeenCalledWith(JSON.stringify(importedDocument));
+    expect(importExecute).toHaveBeenCalledWith(importedContents);
     expect(await screen.findAllByText("Movimiento importado")).not.toHaveLength(0);
-    expect(
-      screen
-        .queryAllByRole("row")
-        .some((row) => row.textContent?.includes("Supermercado"))
-    ).toBe(false);
+    expect(screen.getAllByText("Supermercado")).not.toHaveLength(0);
   });
 
   it("TransactionsPage_WhenImportFileIsInvalid_ShouldShowRecoverableErrorAndKeepCurrentData", async () => {
@@ -548,8 +546,8 @@ describe("TransactionsPage", () => {
 
     await screen.findAllByText("Sueldo");
     await user.upload(
-      screen.getByLabelText("Seleccionar respaldo JSON"),
-      new File(["{bad-json"], "bad.json", { type: "application/json" })
+      screen.getByLabelText("Seleccionar respaldo Excel"),
+      new File(["bad-excel"], "bad.csv", { type: "text/csv" })
     );
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
@@ -584,19 +582,20 @@ describe("TransactionsPage", () => {
     );
 
     expect(await screen.findByText("Recuperar desde respaldo")).toBeInTheDocument();
+    const recoveredContents = createExcelBackup(recoveredDocument);
     await user.upload(
-      screen.getByLabelText("Seleccionar respaldo JSON"),
-      new File([JSON.stringify(recoveredDocument)], "recovery.json", {
-        type: "application/json"
+      screen.getByLabelText("Seleccionar respaldo Excel"),
+      new File([recoveredContents], "recovery.csv", {
+        type: "text/csv"
       })
     );
     await user.click(
       await screen.findByRole("button", {
-        name: "Reemplazar con respaldo importado"
+        name: "Agregar respaldo importado"
       })
     );
 
-    expect(importExecute).toHaveBeenCalledWith(JSON.stringify(recoveredDocument));
+    expect(importExecute).toHaveBeenCalledWith(recoveredContents);
     expect(await screen.findAllByText("Movimiento recuperado")).not.toHaveLength(0);
   });
 });
@@ -622,16 +621,12 @@ function createUseCases({
   verifyPasswordExecute = () => Promise.resolve(),
   exportExecute = () =>
     Promise.resolve({
-      fileName: "domestic-finance-2026-08-01.json",
-      contents: `${JSON.stringify(createStorageDocument(providedTransactions), null, 2)}\n`,
+      fileName: "domestic-finance-2026-08-01.csv",
+      contents: createExcelBackup(createStorageDocument(providedTransactions)),
       document: createStorageDocument(providedTransactions)
     }),
   previewExecute = (contents: string) => {
-    const document = JSON.parse(contents) as StorageDocument;
-
-    if (document.schemaVersion !== 1 || !Array.isArray(document.transactions)) {
-      throw new Error("Importacion invalida");
-    }
+    const document = parseImportStorageDocument(contents);
 
     return {
       schemaVersion: document.schemaVersion,
@@ -644,7 +639,9 @@ function createUseCases({
   mapError = (error: unknown) => {
     if (
       error instanceof SyntaxError ||
-      (error instanceof Error && error.message.includes("Importacion"))
+      (error instanceof Error &&
+        (error.message.includes("Importacion") ||
+          error.name === "ImportValidationError"))
     ) {
       return {
         title: "Importacion invalida",
@@ -740,6 +737,32 @@ function createStorageDocument(
     lastUpdatedAt: "2026-08-01T15:30:00.000Z",
     transactions: documentTransactions
   };
+}
+
+function createExcelBackup(backupDocument: StorageDocument) {
+  const rows = [
+    "sep=,",
+    `schemaVersion,${backupDocument.schemaVersion}`,
+    `lastUpdatedAt,${backupDocument.lastUpdatedAt}`,
+    "",
+    "id,type,date,amount,category,description,paymentMethod,notes,createdAt,updatedAt",
+    ...backupDocument.transactions.map((transaction) =>
+      [
+        transaction.id,
+        transaction.type,
+        transaction.date,
+        transaction.amount,
+        transaction.category,
+        transaction.description,
+        transaction.paymentMethod,
+        transaction.notes ?? "",
+        transaction.createdAt,
+        transaction.updatedAt
+      ].join(",")
+    )
+  ];
+
+  return `${rows.join("\n")}\n`;
 }
 
 function createTransactionFixture(index: number): FinancialTransaction {
