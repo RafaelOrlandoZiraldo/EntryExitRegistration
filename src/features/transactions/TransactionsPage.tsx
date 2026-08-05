@@ -15,6 +15,7 @@ import type {
   UpdateTransactionInput
 } from "@application/use-cases";
 import type { FinancialTransaction } from "@domain/transactions";
+import { useAuth } from "@features/auth";
 import {
   searchTransactions,
   type TransactionFilters,
@@ -106,6 +107,9 @@ export function TransactionsPage({
   downloadFile,
   mapError
 }: TransactionsPageProps) {
+  const auth = useAuth();
+  const canManageOwnTransactions = auth.session?.role === "user";
+  const canDeleteAllTransactions = auth.session?.role === "admin";
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [formState, setFormState] = useState<FormState>({ status: "closed" });
   const [deleteState, setDeleteState] = useState<DeleteState>({
@@ -187,30 +191,36 @@ export function TransactionsPage({
         actions={
           state.status === "success" ? (
             <div className="flex flex-wrap gap-2">
-              <BackupRestoreControls
-                downloadFile={downloadFile}
-                exportStorageDocumentUseCase={exportStorageDocumentUseCase}
-                importStorageDocumentUseCase={importStorageDocumentUseCase}
-                mapError={mapError}
-                previewImportStorageDocumentUseCase={
-                  previewImportStorageDocumentUseCase
-                }
-                onImported={async () => {
-                  await getTransactionsUseCase.execute().then((transactions) => {
-                    setState({ status: "success", transactions });
-                  });
-                }}
-              />
-              <Button
-                type="button"
-                onClick={() => {
-                  setFormState({ status: "create" });
-                }}
-              >
-                <Plus aria-hidden="true" className="mr-2 h-4 w-4" />
-                Nuevo movimiento
-              </Button>
-              {state.transactions.length > 0 ? (
+              {canManageOwnTransactions ? (
+                <>
+                  <BackupRestoreControls
+                    downloadFile={downloadFile}
+                    exportStorageDocumentUseCase={exportStorageDocumentUseCase}
+                    importStorageDocumentUseCase={importStorageDocumentUseCase}
+                    mapError={mapError}
+                    previewImportStorageDocumentUseCase={
+                      previewImportStorageDocumentUseCase
+                    }
+                    onImported={async () => {
+                      await getTransactionsUseCase
+                        .execute()
+                        .then((transactions) => {
+                          setState({ status: "success", transactions });
+                        });
+                    }}
+                  />
+                  <Button
+                    type="button"
+                    onClick={() => {
+                      setFormState({ status: "create" });
+                    }}
+                  >
+                    <Plus aria-hidden="true" className="mr-2 h-4 w-4" />
+                    Nuevo movimiento
+                  </Button>
+                </>
+              ) : null}
+              {canDeleteAllTransactions && state.transactions.length > 0 ? (
                 <Button
                   type="button"
                   variant="destructive"
@@ -272,11 +282,21 @@ export function TransactionsPage({
           {state.transactions.length === 0 ? (
             <EmptyState
               title="Sin movimientos registrados"
-              message="Todavia no hay ingresos ni egresos guardados."
-              actionLabel="Nuevo movimiento"
-              onAction={() => {
-                setFormState({ status: "create" });
-              }}
+              message={
+                canManageOwnTransactions
+                  ? "Todavia no hay ingresos ni egresos guardados."
+                  : "Todavia no hay movimientos cargados por usuarios."
+              }
+              actionLabel={
+                canManageOwnTransactions ? "Nuevo movimiento" : undefined
+              }
+              onAction={
+                canManageOwnTransactions
+                  ? () => {
+                      setFormState({ status: "create" });
+                    }
+                  : undefined
+              }
             />
           ) : null}
 
@@ -298,6 +318,7 @@ export function TransactionsPage({
               onDelete={(transaction) => {
                 setDeleteState({ status: "confirming", transaction });
               }}
+              canManageTransactions={canManageOwnTransactions}
             />
           ) : null}
         </>
@@ -305,7 +326,7 @@ export function TransactionsPage({
 
       <TransactionFormDialog
         mode={formState.status === "edit" ? "edit" : "create"}
-        open={formState.status !== "closed"}
+        open={canManageOwnTransactions && formState.status !== "closed"}
         transaction={
           formState.status === "edit" ? formState.transaction : undefined
         }
@@ -325,7 +346,7 @@ export function TransactionsPage({
       />
 
       <DeleteTransactionDialog
-        open={deleteState.status === "confirming"}
+        open={canManageOwnTransactions && deleteState.status === "confirming"}
         transaction={
           deleteState.status === "confirming"
             ? deleteState.transaction
@@ -346,7 +367,9 @@ export function TransactionsPage({
       />
 
       <DeleteAllTransactionsDialog
-        open={deleteState.status === "confirmingAll"}
+        open={
+          canDeleteAllTransactions && deleteState.status === "confirmingAll"
+        }
         transactionCount={
           state.status === "success" ? state.transactions.length : 0
         }
@@ -437,11 +460,13 @@ type DeleteState =
 function TransactionsList({
   transactions,
   onEdit,
-  onDelete
+  onDelete,
+  canManageTransactions
 }: {
   transactions: FinancialTransaction[];
   onEdit(this: void, transaction: FinancialTransaction): void;
   onDelete(this: void, transaction: FinancialTransaction): void;
+  canManageTransactions: boolean;
 }) {
   const [pagination, setPagination] = useState<PaginationState>({
     pageIndex: 0,
@@ -483,6 +508,7 @@ function TransactionsList({
         header: "Acciones",
         cell: ({ row }) => (
           <TransactionActions
+            canManageTransactions={canManageTransactions}
             onDelete={onDelete}
             onEdit={onEdit}
             transaction={row.original}
@@ -490,7 +516,7 @@ function TransactionsList({
         )
       }
     ],
-    [onDelete, onEdit]
+    [canManageTransactions, onDelete, onEdit]
   );
   const table = useReactTable({
     data: transactions,
@@ -586,6 +612,7 @@ function TransactionsList({
             </dl>
             <div className="mt-4">
               <TransactionActions
+                canManageTransactions={canManageTransactions}
                 onDelete={onDelete}
                 onEdit={onEdit}
                 transaction={transaction}
@@ -684,12 +711,22 @@ function TransactionsPagination({
 function TransactionActions({
   transaction,
   onEdit,
-  onDelete
+  onDelete,
+  canManageTransactions
 }: {
   transaction: FinancialTransaction;
   onEdit(this: void, transaction: FinancialTransaction): void;
   onDelete(this: void, transaction: FinancialTransaction): void;
+  canManageTransactions: boolean;
 }) {
+  if (!canManageTransactions) {
+    return (
+      <span className="text-sm text-muted-foreground">
+        Solo lectura
+      </span>
+    );
+  }
+
   return (
     <div className="flex flex-wrap gap-2">
       <Button

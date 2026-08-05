@@ -56,6 +56,15 @@ export class HttpTransactionRepository implements TransactionRepository {
     });
   }
 
+  async deleteAll(): Promise<void> {
+    const response = await fetch("/api/transactions", {
+      method: "DELETE",
+      credentials: "include"
+    });
+
+    await readSuccessfulJson(response);
+  }
+
   async updateAll(
     updater: (
       transactions: readonly FinancialTransaction[]

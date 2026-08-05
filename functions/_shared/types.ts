@@ -20,6 +20,7 @@ export interface FinancialTransaction {
   notes?: string;
   createdAt: string;
   updatedAt: string;
+  userId?: string;
 }
 
 export interface StorageDocument {
@@ -29,8 +30,19 @@ export interface StorageDocument {
 }
 
 export interface AuthSession {
+  userId: string;
   username: string;
+  role: UserRole;
   expiresAt: number;
+}
+
+export type UserRole = "admin" | "user";
+
+export interface AppUser {
+  id: string;
+  username: string;
+  role: UserRole;
+  createdAt: string;
 }
 
 export interface PagesContext {

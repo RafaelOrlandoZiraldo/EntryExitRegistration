@@ -1,6 +1,7 @@
-import { requireSession, verifyPassword } from "../../_shared/auth";
+import { requireSession, verifyPasswordConfig } from "../../_shared/auth";
 import { jsonResponse, methodNotAllowed, readJson } from "../../_shared/http";
 import type { PagesContext } from "../../_shared/types";
+import { findUserByUsername } from "../../_shared/users";
 
 export async function onRequestPost({ request, env }: PagesContext) {
   const auth = await requireSession(request, env);
@@ -20,7 +21,18 @@ export async function onRequestPost({ request, env }: PagesContext) {
     return jsonResponse({ error: "Invalid credentials." }, { status: 401 });
   }
 
-  if (!(await verifyPassword(env, body.password))) {
+  const user = await findUserByUsername(env.DB, auth.session.username);
+
+  if (
+    user === null ||
+    !(await verifyPasswordConfig({
+      password: body.password,
+      passwordAlgorithm: user.passwordAlgorithm,
+      passwordHash: user.passwordHash,
+      passwordSalt: user.passwordSalt,
+      passwordIterations: user.passwordIterations
+    }))
+  ) {
     return jsonResponse({ error: "Invalid credentials." }, { status: 401 });
   }
 

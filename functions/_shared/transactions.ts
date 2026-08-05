@@ -1,4 +1,4 @@
-import type { FinancialTransaction, StorageDocument } from "./types";
+import type { AuthSession, FinancialTransaction, StorageDocument } from "./types";
 
 interface TransactionRow {
   id: string;
@@ -11,37 +11,56 @@ interface TransactionRow {
   notes: string | null;
   created_at: string;
   updated_at: string;
+  user_id: string | null;
 }
 
-export async function getTransactions(db: D1Database) {
-  const result = await db
-    .prepare(
-      `SELECT id, type, date, amount, category, description, payment_method, notes, created_at, updated_at
-       FROM transactions
-       ORDER BY date DESC, created_at DESC`
-    )
-    .all<TransactionRow>();
+export async function getTransactions(db: D1Database, session: AuthSession) {
+  const statement =
+    session.role === "admin"
+      ? db.prepare(
+          `SELECT id, type, date, amount, category, description, payment_method,
+                  notes, created_at, updated_at, user_id
+           FROM transactions
+           ORDER BY date DESC, created_at DESC`
+        )
+      : db
+          .prepare(
+            `SELECT id, type, date, amount, category, description, payment_method,
+                    notes, created_at, updated_at, user_id
+             FROM transactions
+             WHERE user_id = ?
+             ORDER BY date DESC, created_at DESC`
+          )
+          .bind(session.userId);
+  const result = await statement.all<TransactionRow>();
 
   return (result.results ?? []).map(mapRowToTransaction);
 }
 
-export async function getDocument(db: D1Database): Promise<StorageDocument> {
+export async function getDocument(
+  db: D1Database,
+  session: AuthSession
+): Promise<StorageDocument> {
   return {
     schemaVersion: 1,
     lastUpdatedAt: new Date().toISOString(),
-    transactions: await getTransactions(db)
+    transactions: await getTransactions(db, session)
   };
 }
 
 export async function createTransaction(
   db: D1Database,
-  transaction: FinancialTransaction
+  transaction: FinancialTransaction,
+  session: AuthSession
 ) {
+  assertUserCanMutateOwnTransactions(session);
+
   await db
     .prepare(
       `INSERT INTO transactions
-       (id, type, date, amount, category, description, payment_method, notes, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       (id, type, date, amount, category, description, payment_method, notes,
+        created_at, updated_at, user_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .bind(
       transaction.id,
@@ -53,21 +72,25 @@ export async function createTransaction(
       transaction.paymentMethod,
       transaction.notes ?? null,
       transaction.createdAt,
-      transaction.updatedAt
+      transaction.updatedAt,
+      session.userId
     )
     .run();
 }
 
 export async function updateTransaction(
   db: D1Database,
-  transaction: FinancialTransaction
+  transaction: FinancialTransaction,
+  session: AuthSession
 ) {
+  assertUserCanMutateOwnTransactions(session);
+
   await db
     .prepare(
       `UPDATE transactions
        SET type = ?, date = ?, amount = ?, category = ?, description = ?,
            payment_method = ?, notes = ?, created_at = ?, updated_at = ?
-       WHERE id = ?`
+       WHERE id = ? AND user_id = ?`
     )
     .bind(
       transaction.type,
@@ -79,28 +102,52 @@ export async function updateTransaction(
       transaction.notes ?? null,
       transaction.createdAt,
       transaction.updatedAt,
-      transaction.id
+      transaction.id,
+      session.userId
     )
     .run();
 }
 
-export async function deleteTransaction(db: D1Database, id: string) {
-  await db.prepare("DELETE FROM transactions WHERE id = ?").bind(id).run();
+export async function deleteTransaction(
+  db: D1Database,
+  id: string,
+  session: AuthSession
+) {
+  assertUserCanMutateOwnTransactions(session);
+
+  await db
+    .prepare("DELETE FROM transactions WHERE id = ? AND user_id = ?")
+    .bind(id, session.userId)
+    .run();
 }
 
-export async function deleteAllTransactions(db: D1Database) {
+export async function deleteAllTransactions(
+  db: D1Database,
+  session: AuthSession
+) {
+  if (session.role !== "admin") {
+    throw new Error("Forbidden.");
+  }
+
   await db.prepare("DELETE FROM transactions").run();
 }
 
-export async function replaceDocument(db: D1Database, document: StorageDocument) {
+export async function replaceDocument(
+  db: D1Database,
+  document: StorageDocument,
+  session: AuthSession
+) {
+  assertUserCanMutateOwnTransactions(session);
+
   const statements = [
-    db.prepare("DELETE FROM transactions"),
+    db.prepare("DELETE FROM transactions WHERE user_id = ?").bind(session.userId),
     ...document.transactions.map((transaction) =>
       db
         .prepare(
           `INSERT INTO transactions
-           (id, type, date, amount, category, description, payment_method, notes, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           (id, type, date, amount, category, description, payment_method, notes,
+            created_at, updated_at, user_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
         )
         .bind(
           transaction.id,
@@ -112,7 +159,8 @@ export async function replaceDocument(db: D1Database, document: StorageDocument)
           transaction.paymentMethod,
           transaction.notes ?? null,
           transaction.createdAt,
-          transaction.updatedAt
+          transaction.updatedAt,
+          session.userId
         )
     )
   ];
@@ -120,8 +168,12 @@ export async function replaceDocument(db: D1Database, document: StorageDocument)
   await db.batch(statements);
 }
 
-export async function createDailyBackup(db: D1Database, date: string) {
-  const fileName = `domestic-finance-backup-${date}.json`;
+export async function createDailyBackup(
+  db: D1Database,
+  date: string,
+  session: AuthSession
+) {
+  const fileName = `domestic-finance-backup-${session.userId}-${date}.json`;
   const existing = await db
     .prepare("SELECT file_name FROM daily_backups WHERE file_name = ?")
     .bind(fileName)
@@ -131,13 +183,13 @@ export async function createDailyBackup(db: D1Database, date: string) {
     return { fileName, created: false };
   }
 
-  const document = await getDocument(db);
+  const document = await getDocument(db, session);
 
   await db
     .prepare(
-      "INSERT INTO daily_backups (file_name, created_at, document_json) VALUES (?, ?, ?)"
+      "INSERT INTO daily_backups (file_name, created_at, document_json, user_id) VALUES (?, ?, ?, ?)"
     )
-    .bind(fileName, new Date().toISOString(), JSON.stringify(document))
+    .bind(fileName, new Date().toISOString(), JSON.stringify(document), session.userId)
     .run();
 
   return { fileName, created: true };
@@ -220,6 +272,13 @@ function mapRowToTransaction(row: TransactionRow): FinancialTransaction {
     paymentMethod: row.payment_method,
     ...(row.notes ? { notes: row.notes } : {}),
     createdAt: row.created_at,
-    updatedAt: row.updated_at
+    updatedAt: row.updated_at,
+    ...(row.user_id ? { userId: row.user_id } : {})
   };
+}
+
+function assertUserCanMutateOwnTransactions(session: AuthSession) {
+  if (session.role !== "user") {
+    throw new Error("Forbidden.");
+  }
 }

@@ -1,10 +1,36 @@
 import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { InvalidCredentialsError } from "@application/auth";
 import type { StorageDocument } from "@domain/storage";
 import type { FinancialTransaction } from "@domain/transactions";
 import { TransactionsPage } from "./TransactionsPage";
+
+const authMock = vi.hoisted(() => ({
+  role: "user"
+}));
+
+vi.mock("@features/auth", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@features/auth")>();
+
+  return {
+    ...actual,
+    useAuth: () => ({
+      session: {
+        userId: authMock.role === "admin" ? "admin-user" : "user-1",
+        username: authMock.role === "admin" ? "admin" : "usuario",
+        role: authMock.role,
+        expiresAt: Date.now() + 60_000
+      },
+      isAuthenticated: true,
+      isConfigurationValid: true,
+      isInitializing: false,
+      login: vi.fn(),
+      logout: vi.fn(),
+      refreshSession: vi.fn()
+    })
+  };
+});
 
 const transactions: FinancialTransaction[] = [
   {
@@ -32,6 +58,10 @@ const transactions: FinancialTransaction[] = [
 ];
 
 describe("TransactionsPage", () => {
+  beforeEach(() => {
+    authMock.role = "user";
+  });
+
   it("TransactionsPage_WhenTransactionsLoad_ShouldRenderFormattedRows", async () => {
     render(
       <TransactionsPage
@@ -274,6 +304,7 @@ describe("TransactionsPage", () => {
   });
 
   it("TransactionsPage_WhenDeleteAllPasswordIsInvalid_ShouldKeepTransactions", async () => {
+    authMock.role = "admin";
     const user = userEvent.setup();
     const verifyPasswordExecute = vi.fn(() =>
       Promise.reject(new InvalidCredentialsError())
@@ -303,6 +334,7 @@ describe("TransactionsPage", () => {
   });
 
   it("TransactionsPage_WhenDeleteAllPasswordIsValid_ShouldDeleteRefreshAndClose", async () => {
+    authMock.role = "admin";
     const user = userEvent.setup();
     const execute = vi
       .fn<() => Promise<FinancialTransaction[]>>()

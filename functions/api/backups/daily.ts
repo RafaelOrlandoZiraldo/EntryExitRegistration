@@ -16,7 +16,7 @@ export async function onRequestPost({ request, env }: PagesContext) {
     return jsonResponse({ error: "Invalid backup date." }, { status: 400 });
   }
 
-  const result = await createDailyBackup(env.DB, body.backupDate);
+  const result = await createDailyBackup(env.DB, body.backupDate, auth.session);
 
   return jsonResponse(result);
 }

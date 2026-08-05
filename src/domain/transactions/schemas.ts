@@ -22,6 +22,7 @@ const categorySchema = z.enum([...incomeCategoryKeys, ...expenseCategoryKeys]);
 export const financialTransactionSchema = z
   .object({
     id: z.string().min(1),
+    userId: z.string().min(1).optional(),
     type: z.enum(transactionTypes),
     date: isoDateSchema,
     amount: z.number().positive().finite(),

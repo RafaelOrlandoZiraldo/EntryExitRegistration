@@ -15,6 +15,7 @@ export type PaymentMethod = (typeof paymentMethods)[number];
 
 export interface FinancialTransaction {
   id: string;
+  userId?: string;
   type: TransactionType;
   date: string;
   amount: number;

@@ -15,8 +15,22 @@ interface LocalApiEnv {
   LOCAL_API_ALLOW_RESET?: string;
 }
 
+type UserRole = "admin" | "user";
+
+interface LocalUser {
+  id: string;
+  username: string;
+  role: UserRole;
+  passwordAlgorithm: "sha256" | "pbkdf2";
+  passwordHash: string;
+  passwordSalt: string;
+  passwordIterations: number;
+  createdAt: string;
+}
+
 interface FinancialTransaction {
   id: string;
+  userId?: string;
   type: "income" | "expense";
   date: string;
   amount: number;
@@ -37,16 +51,20 @@ interface StorageDocument {
 interface LocalBackup {
   fileName: string;
   createdAt: string;
+  userId?: string;
   document: StorageDocument;
 }
 
 interface LocalApiState {
   document: StorageDocument;
   backups: LocalBackup[];
+  users: LocalUser[];
 }
 
 interface AuthSession {
+  userId: string;
   username: string;
+  role: UserRole;
   expiresAt: number;
 }
 
@@ -117,27 +135,37 @@ async function handleLocalApiRequest(input: {
       return;
     }
 
+    const state = await readState(dataFilePath);
+    await ensureBootstrapAdmin(dataFilePath, env, state);
     const body = await readJsonBody(request);
+    const user =
+      isRecord(body) && typeof body.username === "string"
+        ? state.users.find((current) => current.username === body.username)
+        : undefined;
 
     if (
+      !user ||
       !isRecord(body) ||
-      typeof body.username !== "string" ||
       typeof body.password !== "string" ||
-      body.username !== env.AUTH_USERNAME ||
-      !verifyPassword(env, body.password)
+      !verifyPasswordConfig(user, body.password)
     ) {
       sendJson(response, 401, { error: "Invalid credentials." });
       return;
     }
 
-    const { session, cookie } = createSessionCookie(env, false);
+    const { session, cookie } = createSessionCookie(env, user, false);
 
     sendJson(response, 200, { session }, { "Set-Cookie": cookie });
     return;
   }
 
   if (pathname === "/api/auth/logout" && method === "POST") {
-    sendJson(response, 200, { ok: true }, { "Set-Cookie": clearSessionCookie(false) });
+    sendJson(
+      response,
+      200,
+      { ok: true },
+      { "Set-Cookie": clearSessionCookie(false) }
+    );
     return;
   }
 
@@ -149,7 +177,7 @@ async function handleLocalApiRequest(input: {
       return;
     }
 
-    const refreshed = createSessionCookie(env, false);
+    const refreshed = createSessionCookie(env, session, false);
     sendJson(
       response,
       200,
@@ -166,13 +194,18 @@ async function handleLocalApiRequest(input: {
     return;
   }
 
+  const state = await readState(dataFilePath);
+  await ensureBootstrapAdmin(dataFilePath, env, state);
+
   if (pathname === "/api/auth/verify-password" && method === "POST") {
     const body = await readJsonBody(request);
+    const user = state.users.find((current) => current.id === session.userId);
 
     if (
+      !user ||
       !isRecord(body) ||
       typeof body.password !== "string" ||
-      !verifyPassword(env, body.password)
+      !verifyPasswordConfig(user, body.password)
     ) {
       sendJson(response, 401, { error: "Invalid credentials." });
       return;
@@ -182,12 +215,72 @@ async function handleLocalApiRequest(input: {
     return;
   }
 
+  if (pathname === "/api/users" && method === "GET") {
+    if (session.role !== "admin") {
+      sendJson(response, 403, { error: "Forbidden." });
+      return;
+    }
+
+    sendJson(response, 200, {
+      users: state.users.map(stripUserSecrets)
+    });
+    return;
+  }
+
+  if (pathname === "/api/users" && method === "POST") {
+    if (session.role !== "admin") {
+      sendJson(response, 403, { error: "Forbidden." });
+      return;
+    }
+
+    const body = await readJsonBody(request);
+
+    const username = isRecord(body) && typeof body.username === "string"
+      ? body.username.trim()
+      : "";
+    const password = isRecord(body) && typeof body.password === "string"
+      ? body.password
+      : "";
+    const role = isRecord(body) && body.role === "admin" ? "admin" : "user";
+
+    if (
+      !isRecord(body) ||
+      typeof body.username !== "string" ||
+      typeof body.password !== "string" ||
+      (body.role !== "admin" && body.role !== "user") ||
+      username.length === 0 ||
+      password.length < 8 ||
+      state.users.some((user) => user.username === username)
+    ) {
+      sendJson(response, 400, { error: "Invalid user." });
+      return;
+    }
+
+    const user: LocalUser = {
+      id: crypto.randomUUID(),
+      username,
+      role,
+      ...hashPassword(password),
+      createdAt: new Date().toISOString()
+    };
+
+    state.users.push(user);
+    await writeState(dataFilePath, state);
+    sendJson(response, 201, { user: stripUserSecrets(user) });
+    return;
+  }
+
   if (pathname === "/api/export" && method === "GET") {
-    sendJson(response, 200, { document: (await readState(dataFilePath)).document });
+    sendJson(response, 200, { document: getDocumentForSession(state, session) });
     return;
   }
 
   if (pathname === "/api/import" && method === "POST") {
+    if (session.role !== "user") {
+      sendJson(response, 403, { error: "Forbidden." });
+      return;
+    }
+
     const body = await readJsonBody(request);
     const document = isRecord(body) ? readDocument(body.document) : null;
 
@@ -196,10 +289,17 @@ async function handleLocalApiRequest(input: {
       return;
     }
 
-    const state = await readState(dataFilePath);
-    state.document = document;
+    state.document.transactions = state.document.transactions
+      .filter((transaction) => transaction.userId !== session.userId)
+      .concat(
+        document.transactions.map((transaction) => ({
+          ...transaction,
+          userId: session.userId
+        }))
+      );
+    state.document.lastUpdatedAt = new Date().toISOString();
     await writeState(dataFilePath, state);
-    sendJson(response, 200, { document });
+    sendJson(response, 200, { document: getDocumentForSession(state, session) });
     return;
   }
 
@@ -211,15 +311,16 @@ async function handleLocalApiRequest(input: {
       return;
     }
 
-    const state = await readState(dataFilePath);
-    const fileName = `domestic-finance-backup-${body.backupDate}.json`;
+    const fileName =
+      `domestic-finance-backup-${session.userId}-${body.backupDate}.json`;
     const exists = state.backups.some((backup) => backup.fileName === fileName);
 
     if (!exists) {
       state.backups.push({
         fileName,
         createdAt: new Date().toISOString(),
-        document: state.document
+        userId: session.userId,
+        document: getDocumentForSession(state, session)
       });
       await writeState(dataFilePath, state);
     }
@@ -229,14 +330,18 @@ async function handleLocalApiRequest(input: {
   }
 
   if (pathname === "/api/transactions" && method === "GET") {
-    const state = await readState(dataFilePath);
     sendJson(response, 200, {
-      transactions: [...state.document.transactions].sort(sortTransactions)
+      transactions: getTransactionsForSession(state, session)
     });
     return;
   }
 
   if (pathname === "/api/transactions" && method === "POST") {
+    if (session.role !== "user") {
+      sendJson(response, 403, { error: "Forbidden." });
+      return;
+    }
+
     const transaction = readTransaction(await readJsonBody(request));
 
     if (transaction === null) {
@@ -244,16 +349,20 @@ async function handleLocalApiRequest(input: {
       return;
     }
 
-    const state = await readState(dataFilePath);
-    state.document.transactions.push(transaction);
+    const nextTransaction = { ...transaction, userId: session.userId };
+    state.document.transactions.push(nextTransaction);
     state.document.lastUpdatedAt = new Date().toISOString();
     await writeState(dataFilePath, state);
-    sendJson(response, 201, { transaction });
+    sendJson(response, 201, { transaction: nextTransaction });
     return;
   }
 
   if (pathname === "/api/transactions" && method === "DELETE") {
-    const state = await readState(dataFilePath);
+    if (session.role !== "admin") {
+      sendJson(response, 403, { error: "Forbidden." });
+      return;
+    }
+
     state.document.transactions = [];
     state.document.lastUpdatedAt = new Date().toISOString();
     await writeState(dataFilePath, state);
@@ -264,6 +373,11 @@ async function handleLocalApiRequest(input: {
   const transactionRoute = pathname.match(/^\/api\/transactions\/([^/]+)$/);
 
   if (transactionRoute && method === "PUT") {
+    if (session.role !== "user") {
+      sendJson(response, 403, { error: "Forbidden." });
+      return;
+    }
+
     const id = decodeURIComponent(transactionRoute[1]);
     const transaction = readTransaction(await readJsonBody(request));
 
@@ -272,21 +386,29 @@ async function handleLocalApiRequest(input: {
       return;
     }
 
-    const state = await readState(dataFilePath);
     state.document.transactions = state.document.transactions.map((current) =>
-      current.id === id ? transaction : current
+      current.id === id && current.userId === session.userId
+        ? { ...transaction, userId: session.userId }
+        : current
     );
     state.document.lastUpdatedAt = new Date().toISOString();
     await writeState(dataFilePath, state);
-    sendJson(response, 200, { transaction });
+    sendJson(response, 200, {
+      transaction: { ...transaction, userId: session.userId }
+    });
     return;
   }
 
   if (transactionRoute && method === "DELETE") {
+    if (session.role !== "user") {
+      sendJson(response, 403, { error: "Forbidden." });
+      return;
+    }
+
     const id = decodeURIComponent(transactionRoute[1]);
-    const state = await readState(dataFilePath);
     state.document.transactions = state.document.transactions.filter(
-      (transaction) => transaction.id !== id
+      (transaction) =>
+        transaction.id !== id || transaction.userId !== session.userId
     );
     state.document.lastUpdatedAt = new Date().toISOString();
     await writeState(dataFilePath, state);
@@ -297,13 +419,46 @@ async function handleLocalApiRequest(input: {
   sendJson(response, 405, { error: "Method not allowed." });
 }
 
+async function ensureBootstrapAdmin(
+  filePath: string,
+  env: LocalApiEnv,
+  state: LocalApiState
+) {
+  if (
+    !validateAuthConfig(env) ||
+    state.users.some((user) => user.username === env.AUTH_USERNAME)
+  ) {
+    return;
+  }
+
+  state.users.push({
+    id: "admin-user",
+    username: env.AUTH_USERNAME ?? "admin",
+    role: "admin",
+    passwordAlgorithm:
+      env.AUTH_PASSWORD_ALGORITHM === "pbkdf2" ? "pbkdf2" : "sha256",
+    passwordHash: env.AUTH_PASSWORD_HASH ?? "",
+    passwordSalt: env.AUTH_PASSWORD_SALT ?? "",
+    passwordIterations: Number(env.AUTH_PASSWORD_ITERATIONS),
+    createdAt: new Date().toISOString()
+  });
+  await writeState(filePath, state);
+}
+
 async function readState(filePath: string): Promise<LocalApiState> {
   try {
     const content = await readFile(filePath, "utf8");
     const parsed = JSON.parse(content) as unknown;
 
     if (isState(parsed)) {
-      return parsed;
+      return {
+        ...parsed,
+        users: parsed.users ?? [],
+        document: {
+          ...parsed.document,
+          transactions: parsed.document.transactions
+        }
+      };
     }
   } catch {
     return createEmptyState();
@@ -324,7 +479,8 @@ function createEmptyState(): LocalApiState {
       lastUpdatedAt: new Date().toISOString(),
       transactions: []
     },
-    backups: []
+    backups: [],
+    users: []
   };
 }
 
@@ -351,27 +507,17 @@ function validateAuthConfig(env: LocalApiEnv) {
   );
 }
 
-function verifyPassword(env: LocalApiEnv, password: string) {
-  if (!validateAuthConfig(env)) {
-    return false;
-  }
-
-  const expected = readBase64Bytes(env.AUTH_PASSWORD_HASH);
-  const salt = readBase64Bytes(env.AUTH_PASSWORD_SALT);
+function verifyPasswordConfig(user: LocalUser, password: string) {
+  const expected = readBase64Bytes(user.passwordHash);
+  const salt = readBase64Bytes(user.passwordSalt);
 
   if (expected === null || salt === null) {
     return false;
   }
 
   const actual =
-    getPasswordAlgorithm(env) === "pbkdf2"
-      ? crypto.pbkdf2Sync(
-          password,
-          salt,
-          Number(env.AUTH_PASSWORD_ITERATIONS),
-          32,
-          "sha256"
-        )
+    user.passwordAlgorithm === "pbkdf2"
+      ? crypto.pbkdf2Sync(password, salt, user.passwordIterations, 32, "sha256")
       : crypto.createHash("sha256").update(salt).update(password).digest();
 
   return (
@@ -380,16 +526,34 @@ function verifyPassword(env: LocalApiEnv, password: string) {
   );
 }
 
+function hashPassword(password: string) {
+  const salt = crypto.randomBytes(16);
+  const hash = crypto.createHash("sha256").update(salt).update(password).digest();
+
+  return {
+    passwordAlgorithm: "sha256" as const,
+    passwordHash: hash.toString("base64"),
+    passwordSalt: salt.toString("base64"),
+    passwordIterations: 310000
+  };
+}
+
 function getPasswordAlgorithm(env: LocalApiEnv) {
   const algorithm = env.AUTH_PASSWORD_ALGORITHM ?? "sha256";
 
   return algorithm === "sha256" || algorithm === "pbkdf2" ? algorithm : null;
 }
 
-function createSessionCookie(env: LocalApiEnv, secure: boolean) {
+function createSessionCookie(
+  env: LocalApiEnv,
+  user: { id?: string; userId?: string; username: string; role: UserRole },
+  secure: boolean
+) {
   const timeoutMinutes = Number(env.SESSION_TIMEOUT_MINUTES);
   const session: AuthSession = {
-    username: env.AUTH_USERNAME ?? "",
+    userId: user.id ?? user.userId ?? "",
+    username: user.username,
+    role: user.role,
     expiresAt: Date.now() + timeoutMinutes * 60_000
   };
   const payload = base64UrlEncode(JSON.stringify(session));
@@ -430,7 +594,11 @@ function readSession(
 
   const [payload, signature] = rawValue.split(".");
 
-  if (!payload || !signature || signature !== signValue(env.SESSION_SECRET ?? "", payload)) {
+  if (
+    !payload ||
+    !signature ||
+    signature !== signValue(env.SESSION_SECRET ?? "", payload)
+  ) {
     return null;
   }
 
@@ -438,7 +606,9 @@ function readSession(
     const session = JSON.parse(base64UrlDecode(payload)) as AuthSession;
 
     if (
+      typeof session.userId !== "string" ||
       typeof session.username !== "string" ||
+      (session.role !== "admin" && session.role !== "user") ||
       typeof session.expiresAt !== "number" ||
       session.expiresAt <= Date.now()
     ) {
@@ -449,6 +619,38 @@ function readSession(
   } catch {
     return null;
   }
+}
+
+function getTransactionsForSession(
+  state: LocalApiState,
+  session: AuthSession
+) {
+  return state.document.transactions
+    .filter(
+      (transaction) =>
+        session.role === "admin" || transaction.userId === session.userId
+    )
+    .sort(sortTransactions);
+}
+
+function getDocumentForSession(
+  state: LocalApiState,
+  session: AuthSession
+): StorageDocument {
+  return {
+    schemaVersion: 1,
+    lastUpdatedAt: state.document.lastUpdatedAt,
+    transactions: getTransactionsForSession(state, session)
+  };
+}
+
+function stripUserSecrets(user: LocalUser) {
+  return {
+    id: user.id,
+    username: user.username,
+    role: user.role,
+    createdAt: user.createdAt
+  };
 }
 
 function readTransaction(value: unknown): FinancialTransaction | null {
@@ -474,6 +676,7 @@ function readTransaction(value: unknown): FinancialTransaction | null {
 
   return {
     id: value.id,
+    ...(typeof value.userId === "string" ? { userId: value.userId } : {}),
     type: value.type,
     date: value.date,
     amount: value.amount,
@@ -489,7 +692,11 @@ function readTransaction(value: unknown): FinancialTransaction | null {
 }
 
 function readDocument(value: unknown): StorageDocument | null {
-  if (!isRecord(value) || value.schemaVersion !== 1 || !Array.isArray(value.transactions)) {
+  if (
+    !isRecord(value) ||
+    value.schemaVersion !== 1 ||
+    !Array.isArray(value.transactions)
+  ) {
     return null;
   }
 
@@ -513,12 +720,19 @@ function isState(value: unknown): value is LocalApiState {
   return (
     isRecord(value) &&
     readDocument(value.document) !== null &&
-    Array.isArray(value.backups)
+    Array.isArray(value.backups) &&
+    (!("users" in value) || Array.isArray(value.users))
   );
 }
 
-function sortTransactions(left: FinancialTransaction, right: FinancialTransaction) {
-  return right.date.localeCompare(left.date) || right.createdAt.localeCompare(left.createdAt);
+function sortTransactions(
+  left: FinancialTransaction,
+  right: FinancialTransaction
+) {
+  return (
+    right.date.localeCompare(left.date) ||
+    right.createdAt.localeCompare(left.createdAt)
+  );
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

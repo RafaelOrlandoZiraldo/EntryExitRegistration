@@ -1,5 +1,11 @@
 import { requireSession } from "../../_shared/auth";
-import { jsonResponse, methodNotAllowed, readJson } from "../../_shared/http";
+import {
+  forbidden,
+  isForbiddenError,
+  jsonResponse,
+  methodNotAllowed,
+  readJson
+} from "../../_shared/http";
 import {
   createTransaction,
   deleteAllTransactions,
@@ -15,7 +21,9 @@ export async function onRequestGet({ request, env }: PagesContext) {
     return auth.response;
   }
 
-  return jsonResponse({ transactions: await getTransactions(env.DB) });
+  return jsonResponse({
+    transactions: await getTransactions(env.DB, auth.session)
+  });
 }
 
 export async function onRequestPost({ request, env }: PagesContext) {
@@ -31,7 +39,15 @@ export async function onRequestPost({ request, env }: PagesContext) {
     return jsonResponse({ error: "Invalid transaction." }, { status: 400 });
   }
 
-  await createTransaction(env.DB, transaction);
+  try {
+    await createTransaction(env.DB, transaction, auth.session);
+  } catch (error) {
+    if (isForbiddenError(error)) {
+      return forbidden();
+    }
+
+    throw error;
+  }
 
   return jsonResponse({ transaction }, { status: 201 });
 }
@@ -43,7 +59,15 @@ export async function onRequestDelete({ request, env }: PagesContext) {
     return auth.response;
   }
 
-  await deleteAllTransactions(env.DB);
+  try {
+    await deleteAllTransactions(env.DB, auth.session);
+  } catch (error) {
+    if (isForbiddenError(error)) {
+      return forbidden();
+    }
+
+    throw error;
+  }
 
   return jsonResponse({ ok: true });
 }

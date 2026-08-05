@@ -9,7 +9,11 @@ export async function onRequestGet({ request, env }: PagesContext) {
     return jsonResponse({ session: null }, { status: 401 });
   }
 
-  const refreshed = await createSessionCookie(env);
+  const refreshed = await createSessionCookie(env, {
+    id: session.userId,
+    username: session.username,
+    role: session.role
+  });
 
   return jsonResponse(
     { session: refreshed.session },

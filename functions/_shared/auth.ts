@@ -1,4 +1,4 @@
-import type { AuthSession, Env } from "./types";
+import type { AuthSession, Env, UserRole } from "./types";
 import { jsonResponse } from "./http";
 
 const sessionCookieName = "domestic_finance_session";
@@ -43,6 +43,32 @@ export async function verifyPassword(env: Env, password: string) {
   }
 }
 
+export async function verifyPasswordConfig(
+  input: {
+    password: string;
+    passwordAlgorithm?: string;
+    passwordHash: string;
+    passwordSalt: string;
+    passwordIterations: number;
+  }
+) {
+  try {
+    const derivedBytes = await derivePasswordBytes(
+      {
+        AUTH_PASSWORD_ALGORITHM: input.passwordAlgorithm,
+        AUTH_PASSWORD_HASH: input.passwordHash,
+        AUTH_PASSWORD_SALT: input.passwordSalt,
+        AUTH_PASSWORD_ITERATIONS: String(input.passwordIterations)
+      },
+      input.password
+    );
+
+    return constantTimeEqual(derivedBytes, base64ToBytes(input.passwordHash));
+  } catch {
+    return false;
+  }
+}
+
 export async function diagnosePasswordVerification(env: Env, password: string) {
   try {
     const derivedBytes = await derivePasswordBytes(env, password);
@@ -63,10 +89,15 @@ export async function diagnosePasswordVerification(env: Env, password: string) {
   }
 }
 
-export async function createSessionCookie(env: Env) {
+export async function createSessionCookie(
+  env: Env,
+  user: { id: string; username: string; role: UserRole }
+) {
   const timeoutMinutes = Number(env.SESSION_TIMEOUT_MINUTES);
   const session: AuthSession = {
-    username: env.AUTH_USERNAME,
+    userId: user.id,
+    username: user.username,
+    role: user.role,
     expiresAt: Date.now() + timeoutMinutes * 60_000
   };
   const payload = base64UrlEncode(JSON.stringify(session));
@@ -116,7 +147,9 @@ export async function readSession(request: Request, env: Env) {
     const session = JSON.parse(base64UrlDecode(payload)) as AuthSession;
 
     if (
+      typeof session.userId !== "string" ||
       typeof session.username !== "string" ||
+      (session.role !== "admin" && session.role !== "user") ||
       typeof session.expiresAt !== "number" ||
       session.expiresAt <= Date.now()
     ) {
@@ -165,7 +198,16 @@ function readBase64Bytes(value: string | undefined) {
   }
 }
 
-async function derivePasswordBytes(env: Env, password: string) {
+async function derivePasswordBytes(
+  env: Pick<
+    Env,
+    | "AUTH_PASSWORD_ALGORITHM"
+    | "AUTH_PASSWORD_HASH"
+    | "AUTH_PASSWORD_SALT"
+    | "AUTH_PASSWORD_ITERATIONS"
+  >,
+  password: string
+) {
   const algorithm = getPasswordAlgorithm(env);
 
   if (algorithm === "sha256") {
@@ -179,7 +221,10 @@ async function derivePasswordBytes(env: Env, password: string) {
   throw new Error("Unsupported password algorithm.");
 }
 
-async function deriveSaltedSha256Bytes(env: Env, password: string) {
+async function deriveSaltedSha256Bytes(
+  env: Pick<Env, "AUTH_PASSWORD_SALT">,
+  password: string
+) {
   const salt = base64ToBytes(env.AUTH_PASSWORD_SALT);
   const passwordBytes = new TextEncoder().encode(password);
   const input = new Uint8Array(salt.byteLength + passwordBytes.byteLength);
@@ -192,7 +237,10 @@ async function deriveSaltedSha256Bytes(env: Env, password: string) {
   return new Uint8Array(digest);
 }
 
-async function derivePbkdf2Bytes(env: Env, password: string) {
+async function derivePbkdf2Bytes(
+  env: Pick<Env, "AUTH_PASSWORD_SALT" | "AUTH_PASSWORD_ITERATIONS">,
+  password: string
+) {
   const passwordKey = await crypto.subtle.importKey(
     "raw",
     new TextEncoder().encode(password),
@@ -215,7 +263,9 @@ async function derivePbkdf2Bytes(env: Env, password: string) {
   return new Uint8Array(bits);
 }
 
-function getPasswordAlgorithm(env: Env) {
+function getPasswordAlgorithm(
+  env: Pick<Env, "AUTH_PASSWORD_ALGORITHM">
+) {
   const algorithm = env.AUTH_PASSWORD_ALGORITHM ?? "sha256";
 
   return algorithm === "sha256" || algorithm === "pbkdf2" ? algorithm : null;

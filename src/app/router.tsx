@@ -2,9 +2,11 @@ import { Navigate, createBrowserRouter } from "react-router-dom";
 import { mapErrorToUserMessage } from "@app/errors/errorMessages";
 import { authServices } from "@app/services/auth";
 import { transactionServices } from "@app/services/transactions";
+import { userServices } from "@app/services/users";
 import { AppShell } from "@app/shell/AppShell";
 import { LoginPage, ProtectedRoute } from "@features/auth";
 import { TransactionsPage } from "@features/transactions";
+import { UsersPage } from "@features/users";
 
 export const router = createBrowserRouter([
   {
@@ -53,6 +55,10 @@ export const router = createBrowserRouter([
                 verifyPasswordUseCase={authServices.verifyPassword}
               />
             )
+          },
+          {
+            path: "users",
+            element: <UsersPage usersService={userServices.users} />
           }
         ]
       }

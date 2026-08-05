@@ -8,6 +8,18 @@ test("user can create edit and delete a transaction", async ({ page }) => {
   await page.getByLabel("Contrasena").fill("correct-password");
   await page.getByRole("button", { name: "Ingresar" }).click();
 
+  await page.getByRole("link", { name: /Usuarios/ }).click();
+  await page.getByLabel("Usuario", { exact: true }).fill("operador");
+  await page.getByLabel("Contraseña").fill("user-password");
+  await page.getByRole("button", { name: "Crear" }).click();
+  await expect(page.getByText("Usuario creado correctamente.")).toBeVisible();
+
+  await page.getByRole("button", { name: "Cerrar sesion" }).click();
+  await page.goto("/login");
+  await page.getByLabel("Usuario").fill("operador");
+  await page.getByLabel("Contrasena").fill("user-password");
+  await page.getByRole("button", { name: "Ingresar" }).click();
+
   await page.getByRole("link", { name: "Movimientos", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "Listado de movimientos" })
@@ -119,6 +131,13 @@ test("user can create edit and delete a transaction", async ({ page }) => {
     .first();
   await expect(restoredRow).toBeVisible();
   await expect(restoredRow).toContainText(/\$\s777,00/);
+
+  await page.getByRole("button", { name: "Cerrar sesion" }).click();
+  await page.goto("/login");
+  await page.getByLabel("Usuario").fill("admin");
+  await page.getByLabel("Contrasena").fill("correct-password");
+  await page.getByRole("button", { name: "Ingresar" }).click();
+  await expect(restoredRow).toBeVisible();
 
   await page.getByRole("button", { name: "Eliminar todos" }).click();
   const deleteAllDialog = page.getByRole("dialog", {

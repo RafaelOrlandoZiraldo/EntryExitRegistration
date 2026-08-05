@@ -64,7 +64,9 @@ describe("SessionStorageSessionService", () => {
     clock.advance(30_000);
 
     expect(service.touch(1)).toEqual({
+      userId: "local-admin",
       username: "admin",
+      role: "admin",
       expiresAt: 91_000
     });
   });

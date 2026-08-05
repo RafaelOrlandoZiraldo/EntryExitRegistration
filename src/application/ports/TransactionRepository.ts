@@ -6,6 +6,7 @@ export interface TransactionRepository {
   getDocument(): Promise<StorageDocument>;
   replaceDocument(document: StorageDocument): Promise<void>;
   replaceAll(transactions: readonly FinancialTransaction[]): Promise<void>;
+  deleteAll?(): Promise<void>;
   updateAll(
     updater: (
       transactions: readonly FinancialTransaction[]

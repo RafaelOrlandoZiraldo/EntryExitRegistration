@@ -7,7 +7,9 @@ export interface AuthConfig {
 }
 
 export interface AuthSession {
+  userId: string;
   username: string;
+  role: "admin" | "user";
   expiresAt: number;
 }
 

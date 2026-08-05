@@ -63,7 +63,9 @@ export class SessionStorageSessionService implements SessionService {
 
   private createSession(username: string, timeoutMinutes: number): AuthSession {
     return {
+      userId: "local-admin",
       username,
+      role: "admin",
       expiresAt: this.clock.now() + timeoutMinutes * 60_000
     };
   }
@@ -81,8 +83,12 @@ export class SessionStorageSessionService implements SessionService {
       if (
         typeof parsed === "object" &&
         parsed !== null &&
+        "userId" in parsed &&
+        typeof parsed.userId === "string" &&
         "username" in parsed &&
         typeof parsed.username === "string" &&
+        "role" in parsed &&
+        (parsed.role === "admin" || parsed.role === "user") &&
         "expiresAt" in parsed &&
         typeof parsed.expiresAt === "number"
       ) {

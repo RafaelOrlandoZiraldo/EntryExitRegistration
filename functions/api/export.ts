@@ -10,7 +10,7 @@ export async function onRequestGet({ request, env }: PagesContext) {
     return auth.response;
   }
 
-  return jsonResponse({ document: await getDocument(env.DB) });
+  return jsonResponse({ document: await getDocument(env.DB, auth.session) });
 }
 
 export function onRequest() {

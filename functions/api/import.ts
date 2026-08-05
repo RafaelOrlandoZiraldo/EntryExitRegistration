@@ -1,5 +1,11 @@
 import { requireSession } from "../_shared/auth";
-import { jsonResponse, methodNotAllowed, readJson } from "../_shared/http";
+import {
+  forbidden,
+  isForbiddenError,
+  jsonResponse,
+  methodNotAllowed,
+  readJson
+} from "../_shared/http";
 import { readDocument, replaceDocument } from "../_shared/transactions";
 import type { PagesContext } from "../_shared/types";
 
@@ -17,7 +23,15 @@ export async function onRequestPost({ request, env }: PagesContext) {
     return jsonResponse({ error: "Invalid storage document." }, { status: 400 });
   }
 
-  await replaceDocument(env.DB, document);
+  try {
+    await replaceDocument(env.DB, document, auth.session);
+  } catch (error) {
+    if (isForbiddenError(error)) {
+      return forbidden();
+    }
+
+    throw error;
+  }
 
   return jsonResponse({ document });
 }
