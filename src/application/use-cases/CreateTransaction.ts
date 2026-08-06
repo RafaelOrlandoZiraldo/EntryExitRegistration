@@ -38,6 +38,12 @@ export class CreateTransaction {
       updatedAt: timestamp
     });
 
+    if (hasCreateTransaction(this.dependencies.repository)) {
+      await this.dependencies.repository.create(transaction);
+
+      return transaction;
+    }
+
     await this.dependencies.repository.updateAll((existingTransactions) => [
       ...existingTransactions,
       transaction
@@ -45,4 +51,15 @@ export class CreateTransaction {
 
     return transaction;
   }
+}
+
+function hasCreateTransaction(
+  repository: TransactionRepository
+): repository is TransactionRepository & {
+  create(transaction: ReturnType<typeof validateFinancialTransaction>): Promise<void>;
+} {
+  return (
+    "create" in repository &&
+    typeof repository.create === "function"
+  );
 }

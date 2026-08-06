@@ -3,7 +3,8 @@ import { jsonResponse, methodNotAllowed, readJson } from "../../_shared/http";
 import {
   createTransaction,
   deleteAllTransactions,
-  getTransactions,
+  getTransactionsPage,
+  readTransactionsPageQuery,
   readTransaction
 } from "../../_shared/transactions";
 import type { PagesContext } from "../../_shared/types";
@@ -15,7 +16,7 @@ export async function onRequestGet({ request, env }: PagesContext) {
     return auth.response;
   }
 
-  return jsonResponse({ transactions: await getTransactions(env.DB) });
+  return jsonResponse(await getTransactionsPage(env.DB, readTransactionsPageQuery(request)));
 }
 
 export async function onRequestPost({ request, env }: PagesContext) {

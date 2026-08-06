@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { DomainValidationError, TransactionNotFoundError } from "@domain/errors";
 import type { StorageDocument } from "@domain/storage";
-import type { FinancialTransaction } from "@domain/transactions";
+import {
+  calculateFinancialSummary,
+  groupExpensesByCategory,
+  searchTransactions,
+  type FinancialTransaction
+} from "@domain/transactions";
 import type { Clock, IdGenerator, TransactionRepository } from "@application/ports";
 import {
   CreateTransaction,
@@ -22,6 +27,28 @@ class FakeTransactionRepository implements TransactionRepository {
 
   getAll() {
     return Promise.resolve([...this.transactions]);
+  }
+
+  getPage({
+    pageIndex,
+    pageSize,
+    filters,
+    sort
+  }: Parameters<TransactionRepository["getPage"]>[0]) {
+    const transactions = searchTransactions(this.transactions, {
+      filters,
+      sort
+    });
+    const start = pageIndex * pageSize;
+
+    return Promise.resolve({
+      transactions: transactions.slice(start, start + pageSize),
+      total: transactions.length,
+      dashboard: {
+        summary: calculateFinancialSummary(transactions),
+        expenseDistribution: groupExpensesByCategory(transactions)
+      }
+    });
   }
 
   getDocument() {
@@ -196,7 +223,16 @@ describe("transaction use cases", () => {
     const repository = new FakeTransactionRepository([existingTransaction]);
     const useCase = new GetTransactions({ repository });
 
-    await expect(useCase.execute()).resolves.toEqual([existingTransaction]);
+    await expect(
+      useCase.execute({ pageIndex: 0, pageSize: 10 })
+    ).resolves.toEqual({
+      transactions: [existingTransaction],
+      total: 1,
+      dashboard: {
+        summary: calculateFinancialSummary([existingTransaction]),
+        expenseDistribution: groupExpensesByCategory([existingTransaction])
+      }
+    });
   });
 
   it("SearchTransactions_WhenCriteriaMatch_ShouldReturnFilteredTransactions", async () => {

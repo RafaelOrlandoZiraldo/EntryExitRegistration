@@ -1,5 +1,10 @@
-import type { TransactionRepository } from "@application/ports";
+import type {
+  GetTransactionsPageInput,
+  TransactionRepository
+} from "@application/ports";
 import {
+  calculateFinancialSummary,
+  groupExpensesByCategory,
   type FinancialTransaction,
   financialTransactionSchema
 } from "@domain/transactions";
@@ -22,6 +27,50 @@ export class HttpTransactionRepository implements TransactionRepository {
     return financialTransactionSchema.array().parse(body.transactions);
   }
 
+  async getPage({
+    pageIndex,
+    pageSize,
+    filters = {},
+    sort = { field: "date", direction: "desc" }
+  }: GetTransactionsPageInput) {
+    const params = new URLSearchParams({
+      pageIndex: String(pageIndex),
+      pageSize: String(pageSize),
+      sortField: sort.field,
+      sortDirection: sort.direction
+    });
+
+    Object.entries(filters).forEach(([key, value]) => {
+      if (value !== undefined) {
+        params.set(key, String(value));
+      }
+    });
+
+    const response = await fetch(`/api/transactions?${params.toString()}`, {
+      credentials: "include"
+    });
+    const body = (await readSuccessfulJson(response)) as {
+      dashboard?: unknown;
+      transactions?: unknown;
+      total?: unknown;
+    };
+    const transactions = financialTransactionSchema
+      .array()
+      .parse(body.transactions);
+    const total =
+      typeof body.total === "number" ? body.total : transactions.length;
+    const pageTransactions =
+      typeof body.total === "number"
+        ? transactions
+        : transactions.slice(pageIndex * pageSize, (pageIndex + 1) * pageSize);
+
+    return {
+      transactions: pageTransactions,
+      total,
+      dashboard: readDashboard(body.dashboard, transactions)
+    };
+  }
+
   async getDocument(): Promise<StorageDocument> {
     const response = await fetch("/api/export", {
       credentials: "include"
@@ -31,6 +80,55 @@ export class HttpTransactionRepository implements TransactionRepository {
     };
 
     return storageDocumentSchema.parse(body.document);
+  }
+
+  async create(transaction: FinancialTransaction): Promise<void> {
+    const response = await fetch("/api/transactions", {
+      method: "POST",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(transaction)
+    });
+
+    await readSuccessfulJson(response);
+  }
+
+  async getById(id: string): Promise<FinancialTransaction> {
+    const response = await fetch(`/api/transactions/${encodeURIComponent(id)}`, {
+      credentials: "include"
+    });
+    const body = (await readSuccessfulJson(response)) as {
+      transaction?: unknown;
+    };
+
+    return financialTransactionSchema.parse(body.transaction);
+  }
+
+  async update(transaction: FinancialTransaction): Promise<void> {
+    const response = await fetch(
+      `/api/transactions/${encodeURIComponent(transaction.id)}`,
+      {
+        method: "PUT",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify(transaction)
+      }
+    );
+
+    await readSuccessfulJson(response);
+  }
+
+  async delete(id: string): Promise<void> {
+    const response = await fetch(`/api/transactions/${encodeURIComponent(id)}`, {
+      method: "DELETE",
+      credentials: "include"
+    });
+
+    await readSuccessfulJson(response);
   }
 
   async replaceDocument(document: StorageDocument): Promise<void> {
@@ -76,4 +174,27 @@ async function readSuccessfulJson(response: Response): Promise<unknown> {
   }
 
   return response.json();
+}
+
+function readDashboard(
+  value: unknown,
+  fallbackTransactions: readonly FinancialTransaction[]
+) {
+  if (
+    typeof value === "object" &&
+    value !== null &&
+    "summary" in value &&
+    "expenseDistribution" in value
+  ) {
+    return value as ReturnType<typeof createDashboard>;
+  }
+
+  return createDashboard(fallbackTransactions);
+}
+
+function createDashboard(transactions: readonly FinancialTransaction[]) {
+  return {
+    summary: calculateFinancialSummary(transactions),
+    expenseDistribution: groupExpensesByCategory(transactions)
+  };
 }

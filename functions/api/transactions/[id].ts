@@ -2,10 +2,33 @@ import { requireSession } from "../../_shared/auth";
 import { jsonResponse, methodNotAllowed, readJson } from "../../_shared/http";
 import {
   deleteTransaction,
+  getTransactionById,
   readTransaction,
   updateTransaction
 } from "../../_shared/transactions";
 import type { PagesContext } from "../../_shared/types";
+
+export async function onRequestGet({ request, env, params }: PagesContext) {
+  const auth = await requireSession(request, env);
+
+  if (!auth.ok) {
+    return auth.response;
+  }
+
+  const id = readId(params);
+
+  if (id === null) {
+    return jsonResponse({ error: "Invalid transaction id." }, { status: 400 });
+  }
+
+  const transaction = await getTransactionById(env.DB, id);
+
+  if (transaction === null) {
+    return jsonResponse({ error: "Transaction not found." }, { status: 404 });
+  }
+
+  return jsonResponse({ transaction });
+}
 
 export async function onRequestPut({ request, env, params }: PagesContext) {
   const auth = await requireSession(request, env);

@@ -9,6 +9,12 @@ export class DeleteTransaction {
   constructor(private readonly dependencies: DeleteTransactionDependencies) {}
 
   async execute(id: string) {
+    if (hasDeleteTransaction(this.dependencies.repository)) {
+      await this.dependencies.repository.delete(id);
+
+      return;
+    }
+
     await this.dependencies.repository.updateAll((existingTransactions) => {
       const exists = existingTransactions.some(
         (transaction) => transaction.id === id
@@ -21,4 +27,12 @@ export class DeleteTransaction {
       return existingTransactions.filter((transaction) => transaction.id !== id);
     });
   }
+}
+
+function hasDeleteTransaction(
+  repository: TransactionRepository
+): repository is TransactionRepository & {
+  delete(id: string): Promise<void>;
+} {
+  return "delete" in repository && typeof repository.delete === "function";
 }

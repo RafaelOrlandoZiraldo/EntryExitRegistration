@@ -1,4 +1,7 @@
-import type { TransactionRepository } from "@application/ports";
+import type {
+  GetTransactionsPageInput,
+  TransactionRepository
+} from "@application/ports";
 
 export interface GetTransactionsDependencies {
   repository: TransactionRepository;
@@ -7,7 +10,7 @@ export interface GetTransactionsDependencies {
 export class GetTransactions {
   constructor(private readonly dependencies: GetTransactionsDependencies) {}
 
-  async execute() {
-    return this.dependencies.repository.getAll();
+  async execute(input: GetTransactionsPageInput) {
+    return this.dependencies.repository.getPage(input);
   }
 }
