@@ -49,12 +49,12 @@ export function FinancialDashboard({
         <SummaryCard
           label="Total ingresos"
           value={formatTransactionAmount(summary.income)}
-          detail="Ingresos visibles"
+          detail="Ingresos totales"
         />
         <SummaryCard
           label="Total egresos"
           value={formatTransactionAmount(summary.expenses)}
-          detail="Egresos visibles"
+          detail="Egresos totales"
         />
         <SummaryCard
           label="Balance"
@@ -64,7 +64,7 @@ export function FinancialDashboard({
         <SummaryCard
           label="Movimientos"
           value={String(summary.transactionCount)}
-          detail="Cantidad visible"
+          detail="Cantidad total"
         />
       </dl>
 
@@ -105,14 +105,14 @@ export function FinancialDashboard({
             </div>
           ) : (
             <div className="mt-3 flex min-h-[220px] items-center rounded-md border border-dashed border-border bg-muted/40 p-4 text-sm text-muted-foreground">
-              No hay egresos visibles para graficar.
+              No hay egresos para graficar.
             </div>
           )}
         </div>
 
         <div>
           <p className="text-sm text-muted-foreground">
-            Distribucion calculada sobre egresos visibles.
+            Distribucion calculada sobre egresos totales.
           </p>
           {expenseDistribution.length > 0 ? (
             <ul className="mt-4 grid gap-3">
@@ -142,7 +142,7 @@ export function FinancialDashboard({
             </ul>
           ) : (
             <p className="mt-4 rounded-md border border-border bg-background p-3 text-sm">
-              El total de egresos visible es {formatTransactionAmount(0)}.
+              El total de egresos es {formatTransactionAmount(0)}.
             </p>
           )}
         </div>

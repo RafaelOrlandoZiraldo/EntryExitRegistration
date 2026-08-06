@@ -1,10 +1,17 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { InvalidCredentialsError } from "@application/auth";
 import { parseImportStorageDocument } from "@application/use-cases";
 import type { StorageDocument } from "@domain/storage";
-import type { FinancialTransaction } from "@domain/transactions";
+import {
+  calculateFinancialSummary,
+  groupExpensesByCategory,
+  searchTransactions,
+  type FinancialTransaction,
+  type TransactionFilters,
+  type TransactionSort
+} from "@domain/transactions";
 import { TransactionsPage } from "./TransactionsPage";
 
 const transactions: FinancialTransaction[] = [
@@ -33,6 +40,10 @@ const transactions: FinancialTransaction[] = [
 ];
 
 describe("TransactionsPage", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("TransactionsPage_WhenTransactionsLoad_ShouldRenderFormattedRows", async () => {
     render(
       <TransactionsPage
@@ -115,18 +126,114 @@ describe("TransactionsPage", () => {
     );
 
     expect(await screen.findAllByText("Movimiento 01")).not.toHaveLength(0);
-    expect(screen.queryByText("Movimiento 11")).not.toBeInTheDocument();
+    const table = screen.getByRole("table");
+    const dashboard = screen.getByRole("region", {
+      name: "Indicadores financieros"
+    });
+
+    expect(within(table).queryByText("Movimiento 11")).not.toBeInTheDocument();
+    expect(within(dashboard).getByText("12")).toBeInTheDocument();
     expect(screen.getByText("Pagina 1 de 2")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Pagina siguiente" }));
 
-    expect(await screen.findAllByText("Movimiento 11")).not.toHaveLength(0);
-    expect(screen.queryByText("Movimiento 01")).not.toBeInTheDocument();
+    const nextPageTable = await screen.findByRole("table");
+    expect(
+      await within(nextPageTable).findByText("Movimiento 11")
+    ).toBeInTheDocument();
+    expect(
+      within(nextPageTable).queryByText("Movimiento 01")
+    ).not.toBeInTheDocument();
 
     await user.selectOptions(screen.getByLabelText("Filas por pagina"), "25");
 
-    expect(await screen.findAllByText("Movimiento 01")).not.toHaveLength(0);
+    const resizedPageTable = await screen.findByRole("table");
+    expect(
+      await within(resizedPageTable).findByText("Movimiento 01")
+    ).toBeInTheDocument();
     expect(screen.getByText("Pagina 1 de 1")).toBeInTheDocument();
+  });
+
+  it("TransactionsPage_WhenChangingDesktopPage_ShouldKeepDashboardAndTableMounted", async () => {
+    const user = userEvent.setup();
+    const nextPage = createDeferred<FinancialTransaction[]>();
+    const manyTransactions = Array.from({ length: 12 }, (_, index) =>
+      createTransactionFixture(index + 1)
+    );
+    const execute = vi
+      .fn<(input: unknown) => Promise<FinancialTransaction[]>>()
+      .mockResolvedValueOnce(manyTransactions)
+      .mockReturnValueOnce(nextPage.promise);
+    render(
+      <TransactionsPage
+        {...createUseCases({ execute })}
+      />
+    );
+
+    expect(await screen.findByText("Pagina 1 de 2")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Pagina siguiente" }));
+
+    expect(screen.queryByText("Cargando movimientos")).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("region", { name: "Indicadores financieros" })
+    ).toBeInTheDocument();
+    expect(screen.getByRole("table")).toBeInTheDocument();
+    expect(screen.getByText("Cargando pagina")).toBeInTheDocument();
+
+    act(() => {
+      nextPage.resolve(manyTransactions);
+    });
+
+    expect(await screen.findByText("Pagina 2 de 2")).toBeInTheDocument();
+  });
+
+  it("TransactionsPage_WhenMobileScrollReachesEnd_ShouldLoadNextTransactions", async () => {
+    let intersectionCallback:
+      | ((entries: Pick<IntersectionObserverEntry, "isIntersecting">[]) => void)
+      | null = null;
+    const manyTransactions = Array.from({ length: 12 }, (_, index) =>
+      createTransactionFixture(index + 1)
+    );
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn(() => ({
+        matches: true,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn()
+      }))
+    );
+    vi.stubGlobal(
+      "IntersectionObserver",
+      vi.fn((callback) => {
+        intersectionCallback = callback as typeof intersectionCallback;
+
+        return {
+          disconnect: vi.fn(),
+          observe: vi.fn(),
+          unobserve: vi.fn()
+        };
+      })
+    );
+
+    render(
+      <TransactionsPage
+        {...createUseCases({ transactions: manyTransactions })}
+      />
+    );
+
+    expect(await screen.findAllByText("Movimiento 01")).not.toHaveLength(0);
+    expect(screen.queryByText("Movimiento 11")).not.toBeInTheDocument();
+
+    await waitFor(() => {
+      expect(intersectionCallback).not.toBeNull();
+    });
+
+    act(() => {
+      intersectionCallback?.([{ isIntersecting: true }]);
+    });
+
+    expect(await screen.findAllByText("Movimiento 11")).not.toHaveLength(0);
   });
 
   it("TransactionsPage_WhenCreateSucceeds_ShouldReloadFromSingleSourceOfTruth", async () => {
@@ -674,7 +781,11 @@ function createUseCases({
   }
 }: {
   transactions?: FinancialTransaction[];
-  execute?: () => Promise<FinancialTransaction[]>;
+  execute?: (input: unknown) => Promise<FinancialTransaction[] | {
+    transactions: FinancialTransaction[];
+    total: number;
+    dashboard: ReturnType<typeof createDashboard>;
+  }>;
   createExecute?: (input: unknown) => Promise<FinancialTransaction>;
   updateExecute?: (input: unknown) => Promise<FinancialTransaction>;
   deleteExecute?: (id: string) => Promise<void>;
@@ -696,7 +807,15 @@ function createUseCases({
 }) {
   return {
     getTransactionsUseCase: {
-      execute
+      execute: async (input: unknown) => {
+        const result = await execute(input);
+
+        if (!Array.isArray(result)) {
+          return result;
+        }
+
+        return createPaginatedResult(result, input);
+      }
     },
     createTransactionUseCase: {
       execute: createExecute
@@ -780,6 +899,52 @@ function createTransactionFixture(index: number): FinancialTransaction {
     createdAt: `2026-08-${day}T10:00:00.000Z`,
     updatedAt: `2026-08-${day}T10:00:00.000Z`
   };
+}
+
+function createPaginatedResult(
+  transactions: FinancialTransaction[],
+  input: unknown
+) {
+  const request =
+    typeof input === "object" && input !== null
+      ? (input as {
+          pageIndex?: number;
+          pageSize?: number;
+          filters?: TransactionFilters;
+          sort?: TransactionSort;
+        })
+      : {};
+  const pageIndex = request.pageIndex ?? 0;
+  const pageSize = request.pageSize ?? 10;
+  const visibleTransactions = searchTransactions(transactions, {
+    filters: request.filters,
+    sort: request.sort
+  });
+  const start = pageIndex * pageSize;
+
+  return {
+    transactions: visibleTransactions.slice(start, start + pageSize),
+    total: visibleTransactions.length,
+    dashboard: createDashboard(visibleTransactions)
+  };
+}
+
+function createDashboard(transactions: readonly FinancialTransaction[]) {
+  return {
+    summary: calculateFinancialSummary(transactions),
+    expenseDistribution: groupExpensesByCategory(transactions)
+  };
+}
+
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+
+  return { promise, reject, resolve };
 }
 
 async function fillTransactionForm(

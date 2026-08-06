@@ -18,6 +18,8 @@ interface AuthProviderDependencies {
 }
 
 const AuthContext = React.createContext<AuthContextValue | null>(null);
+const sessionCheckIntervalMs = 60_000;
+const sessionActivityRefreshThrottleMs = 60_000;
 
 export interface AuthProviderProps {
   children: React.ReactNode;
@@ -70,13 +72,24 @@ export function AuthProvider({ children, dependencies }: AuthProviderProps) {
       return undefined;
     }
 
+    let lastActivityRefreshAt = 0;
     const checkSession = () => {
       void authDependencies.authClient.getCurrent().then(setSession);
     };
     const refreshOnActivity = () => {
+      const now = Date.now();
+
+      if (now - lastActivityRefreshAt < sessionActivityRefreshThrottleMs) {
+        return;
+      }
+
+      lastActivityRefreshAt = now;
       void refreshSession();
     };
-    const intervalId = window.setInterval(checkSession, 5_000);
+    const intervalId = window.setInterval(
+      checkSession,
+      sessionCheckIntervalMs
+    );
 
     window.addEventListener("pointerdown", refreshOnActivity);
     window.addEventListener("keydown", refreshOnActivity);

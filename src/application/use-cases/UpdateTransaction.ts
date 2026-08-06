@@ -27,6 +27,20 @@ export class UpdateTransaction {
   constructor(private readonly dependencies: UpdateTransactionDependencies) {}
 
   async execute(input: UpdateTransactionInput) {
+    if (hasGetAndUpdateTransaction(this.dependencies.repository)) {
+      const currentTransaction =
+        await this.dependencies.repository.getById(input.id);
+      const updatedTransaction = validateFinancialTransaction({
+        ...input,
+        createdAt: currentTransaction.createdAt,
+        updatedAt: this.dependencies.clock.now()
+      });
+
+      await this.dependencies.repository.update(updatedTransaction);
+
+      return updatedTransaction;
+    }
+
     let updatedTransaction:
       | ReturnType<typeof validateFinancialTransaction>
       | undefined;
@@ -58,4 +72,18 @@ export class UpdateTransaction {
 
     return updatedTransaction;
   }
+}
+
+function hasGetAndUpdateTransaction(
+  repository: TransactionRepository
+): repository is TransactionRepository & {
+  getById(id: string): Promise<ReturnType<typeof validateFinancialTransaction>>;
+  update(transaction: ReturnType<typeof validateFinancialTransaction>): Promise<void>;
+} {
+  return (
+    "getById" in repository &&
+    typeof repository.getById === "function" &&
+    "update" in repository &&
+    typeof repository.update === "function"
+  );
 }

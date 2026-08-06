@@ -5,7 +5,12 @@ import {
   storageDocumentSchema,
   type StorageDocument
 } from "@domain/storage";
-import type { FinancialTransaction } from "@domain/transactions";
+import {
+  calculateFinancialSummary,
+  groupExpensesByCategory,
+  searchTransactions,
+  type FinancialTransaction
+} from "@domain/transactions";
 import { CorruptedDataFileError, DataValidationError } from "./errors";
 import { migrateStorageDocument } from "./migrations";
 import type { TextFileAdapter } from "./TextFileAdapter";
@@ -25,6 +30,28 @@ export class OpfsTransactionRepository implements TransactionRepository {
     const document = await this.loadOrCreateDocument();
 
     return [...document.transactions];
+  }
+
+  async getPage({
+    pageIndex,
+    pageSize,
+    filters,
+    sort
+  }: Parameters<TransactionRepository["getPage"]>[0]) {
+    const transactions = searchTransactions(await this.getAll(), {
+      filters,
+      sort
+    });
+    const start = pageIndex * pageSize;
+
+    return {
+      transactions: transactions.slice(start, start + pageSize),
+      total: transactions.length,
+      dashboard: {
+        summary: calculateFinancialSummary(transactions),
+        expenseDistribution: groupExpensesByCategory(transactions)
+      }
+    };
   }
 
   async getDocument() {

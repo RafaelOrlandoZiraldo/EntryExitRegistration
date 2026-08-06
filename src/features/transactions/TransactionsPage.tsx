@@ -1,22 +1,26 @@
 import {
   flexRender,
   getCoreRowModel,
-  getPaginationRowModel,
   useReactTable,
   type ColumnDef,
   type PaginationState
 } from "@tanstack/react-table";
 import { ChevronLeft, ChevronRight, Edit, Plus, Trash2 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type {
   CreateTransactionInput,
   ExportStorageDocumentResult,
   ImportPreview,
   UpdateTransactionInput
 } from "@application/use-cases";
+import type {
+  GetTransactionsPageInput,
+  GetTransactionsPageResult
+} from "@application/ports";
 import type { FinancialTransaction } from "@domain/transactions";
 import {
-  searchTransactions,
+  calculateFinancialSummary,
+  groupExpensesByCategory,
   type TransactionFilters,
   type TransactionSort
 } from "@domain/transactions";
@@ -43,14 +47,16 @@ import {
   type TransactionFilterDraft,
   type TransactionFilterErrors
 } from "./transactionFilterForm";
-import { createTransactionDashboardSelector } from "./transactionDashboardSelectors";
 import { FinancialDashboard } from "./FinancialDashboard";
 import { TransactionsFilterPanel } from "./TransactionsFilterPanel";
 import { TransactionFormDialog } from "./TransactionFormDialog";
 
 export interface TransactionsPageProps {
   getTransactionsUseCase: {
-    execute(this: void): Promise<FinancialTransaction[]>;
+    execute(
+      this: void,
+      input: GetTransactionsPageInput
+    ): Promise<GetTransactionsPageResult>;
   };
   createTransactionUseCase: {
     execute(input: CreateTransactionInput): Promise<FinancialTransaction>;
@@ -90,8 +96,22 @@ export interface TransactionsPageProps {
 
 type LoadState =
   | { status: "loading" }
-  | { status: "success"; transactions: FinancialTransaction[] }
+  | { status: "success" } & GetTransactionsPageResult
   | { status: "error"; error: unknown };
+
+const defaultPagination: PaginationState = {
+  pageIndex: 0,
+  pageSize: 10
+};
+
+function createEmptyDashboard() {
+  const transactions: FinancialTransaction[] = [];
+
+  return {
+    summary: calculateFinancialSummary(transactions),
+    expenseDistribution: groupExpensesByCategory(transactions)
+  };
+}
 
 export function TransactionsPage({
   getTransactionsUseCase,
@@ -120,43 +140,89 @@ export function TransactionsPage({
     field: "date",
     direction: "desc"
   });
-  const dashboardSelector = useMemo(createTransactionDashboardSelector, []);
-
-  const loadTransactions = useCallback(() => {
-    setState({ status: "loading" });
-    void getTransactionsUseCase
-      .execute()
-      .then((transactions) => {
-        setState({ status: "success", transactions });
-      })
-      .catch((error: unknown) => {
-        setState({ status: "error", error });
-      });
-  }, [getTransactionsUseCase]);
+  const [pagination, setPagination] =
+    useState<PaginationState>(defaultPagination);
+  const [isMobileViewport, setIsMobileViewport] = useState(false);
+  const [tableIsLoading, setTableIsLoading] = useState(false);
 
   useEffect(() => {
-    loadTransactions();
-  }, [loadTransactions]);
-
-  const visibleTransactions = useMemo(() => {
-    if (state.status !== "success") {
-      return [];
+    if (typeof window.matchMedia !== "function") {
+      return;
     }
 
-    return searchTransactions(state.transactions, {
-      filters: activeFilters,
-      sort: activeSort
-    });
-  }, [activeFilters, activeSort, state]);
+    const mediaQuery = window.matchMedia("(max-width: 767px)");
+    const updateViewport = () => {
+      setIsMobileViewport(mediaQuery.matches);
+    };
+
+    updateViewport();
+    mediaQuery.addEventListener?.("change", updateViewport);
+
+    return () => {
+      mediaQuery.removeEventListener?.("change", updateViewport);
+    };
+  }, []);
+
+  const loadTransactions = useCallback(
+    ({
+      nextPagination,
+      mode,
+      scope
+    }: {
+      nextPagination: PaginationState;
+      mode: "replace" | "append";
+      scope: "page" | "table";
+    }) => {
+      if (scope === "page") {
+        setState({ status: "loading" });
+      } else {
+        setTableIsLoading(true);
+      }
+
+      void getTransactionsUseCase
+        .execute({
+          ...nextPagination,
+          filters: activeFilters,
+          sort: activeSort
+        })
+        .then((result) => {
+          setState((current) => ({
+            status: "success",
+            transactions:
+              mode === "append" && current.status === "success"
+                ? [...current.transactions, ...result.transactions]
+                : result.transactions,
+            total: result.total,
+            dashboard: result.dashboard
+          }));
+        })
+        .catch((error: unknown) => {
+          setState({ status: "error", error });
+        })
+        .finally(() => {
+          if (scope === "table") {
+            setTableIsLoading(false);
+          }
+        });
+    },
+    [activeFilters, activeSort, getTransactionsUseCase]
+  );
+
+  useEffect(() => {
+    const nextPagination = defaultPagination;
+
+    setPagination(nextPagination);
+    loadTransactions({ nextPagination, mode: "replace", scope: "page" });
+  }, [loadTransactions]);
 
   const filtersAreActive =
     Object.keys(activeFilters).length > 0 ||
     activeSort.field !== "date" ||
     activeSort.direction !== "desc";
-  const dashboardData = useMemo(
-    () => dashboardSelector(visibleTransactions),
-    [dashboardSelector, visibleTransactions]
-  );
+  const dashboardData =
+    state.status === "success"
+      ? state.dashboard
+      : createEmptyDashboard();
 
   const applyFilters = () => {
     const parsed = parseTransactionFilterDraft(filterDraft);
@@ -169,6 +235,7 @@ export function TransactionsPage({
     setFilterErrors({});
     setActiveFilters(parsed.filters);
     setActiveSort(parsed.sort);
+    setPagination(defaultPagination);
   };
 
   const clearFilters = () => {
@@ -176,6 +243,19 @@ export function TransactionsPage({
     setFilterErrors({});
     setActiveFilters({});
     setActiveSort({ field: "date", direction: "desc" });
+    setPagination(defaultPagination);
+  };
+
+  const refreshCurrentPage = async () => {
+    await getTransactionsUseCase
+      .execute({
+        ...pagination,
+        filters: activeFilters,
+        sort: activeSort
+      })
+      .then((result) => {
+        setState({ status: "success", ...result });
+      });
   };
 
   return (
@@ -196,9 +276,7 @@ export function TransactionsPage({
                   previewImportStorageDocumentUseCase
                 }
                 onImported={async () => {
-                  await getTransactionsUseCase.execute().then((transactions) => {
-                    setState({ status: "success", transactions });
-                  });
+                  await refreshCurrentPage();
                 }}
               />
               <Button
@@ -245,11 +323,15 @@ export function TransactionsPage({
             previewImportStorageDocumentUseCase
           }
           onImported={async () => {
-            await getTransactionsUseCase.execute().then((transactions) => {
-              setState({ status: "success", transactions });
+            await refreshCurrentPage();
+          }}
+          onRetry={() => {
+            loadTransactions({
+              nextPagination: pagination,
+              mode: "replace",
+              scope: "page"
             });
           }}
-          onRetry={loadTransactions}
         />
       ) : null}
 
@@ -268,7 +350,9 @@ export function TransactionsPage({
             summary={dashboardData.summary}
           />
 
-          {state.transactions.length === 0 ? (
+          {state.transactions.length === 0 &&
+          state.total === 0 &&
+          !filtersAreActive ? (
             <EmptyState
               title="Sin movimientos registrados"
               message="Todavia no hay ingresos ni egresos guardados."
@@ -279,7 +363,9 @@ export function TransactionsPage({
             />
           ) : null}
 
-          {state.transactions.length > 0 && visibleTransactions.length === 0 ? (
+          {state.transactions.length === 0 &&
+          state.total === 0 &&
+          filtersAreActive ? (
             <EmptyState
               title="Sin resultados para los filtros"
               message="No hay movimientos que coincidan con los criterios activos."
@@ -288,9 +374,34 @@ export function TransactionsPage({
             />
           ) : null}
 
-          {visibleTransactions.length > 0 ? (
+          {state.transactions.length > 0 ? (
             <TransactionsList
-              transactions={visibleTransactions}
+              isMobileViewport={isMobileViewport}
+              pagination={pagination}
+              tableIsLoading={tableIsLoading}
+              totalRows={state.total}
+              transactions={state.transactions}
+              onLoadMore={() => {
+                const nextPagination = {
+                  pageIndex: pagination.pageIndex + 1,
+                  pageSize: pagination.pageSize
+                };
+
+                setPagination(nextPagination);
+                loadTransactions({
+                  nextPagination,
+                  mode: "append",
+                  scope: "table"
+                });
+              }}
+              onPaginationChange={(nextPagination) => {
+                setPagination(nextPagination);
+                loadTransactions({
+                  nextPagination,
+                  mode: "replace",
+                  scope: "table"
+                });
+              }}
               onEdit={(transaction) => {
                 setFormState({ status: "edit", transaction });
               }}
@@ -316,9 +427,7 @@ export function TransactionsPage({
         onCreate={(input) => createTransactionUseCase.execute(input)}
         onUpdate={(input) => updateTransactionUseCase.execute(input)}
         onSuccess={async () => {
-          await getTransactionsUseCase.execute().then((transactions) => {
-            setState({ status: "success", transactions });
-          });
+          await refreshCurrentPage();
         }}
         mapError={mapError}
       />
@@ -337,9 +446,7 @@ export function TransactionsPage({
         }}
         onDelete={(id) => deleteTransactionUseCase.execute(id)}
         onSuccess={async () => {
-          await getTransactionsUseCase.execute().then((transactions) => {
-            setState({ status: "success", transactions });
-          });
+          await refreshCurrentPage();
         }}
         mapError={mapError}
       />
@@ -347,7 +454,7 @@ export function TransactionsPage({
       <DeleteAllTransactionsDialog
         open={deleteState.status === "confirmingAll"}
         transactionCount={
-          state.status === "success" ? state.transactions.length : 0
+          state.status === "success" ? state.total : 0
         }
         onOpenChange={(open) => {
           if (!open) {
@@ -357,9 +464,7 @@ export function TransactionsPage({
         onVerifyPassword={(password) => verifyPasswordUseCase.execute(password)}
         onDeleteAll={() => deleteAllTransactionsUseCase.execute()}
         onSuccess={async () => {
-          await getTransactionsUseCase.execute().then((transactions) => {
-            setState({ status: "success", transactions });
-          });
+          await refreshCurrentPage();
         }}
         mapError={mapError}
       />
@@ -434,18 +539,27 @@ type DeleteState =
   | { status: "confirmingAll" };
 
 function TransactionsList({
+  isMobileViewport,
+  pagination,
+  tableIsLoading,
+  totalRows,
   transactions,
+  onLoadMore,
+  onPaginationChange,
   onEdit,
   onDelete
 }: {
+  isMobileViewport: boolean;
+  pagination: PaginationState;
+  tableIsLoading: boolean;
+  totalRows: number;
   transactions: FinancialTransaction[];
+  onLoadMore(this: void): void;
+  onPaginationChange(this: void, pagination: PaginationState): void;
   onEdit(this: void, transaction: FinancialTransaction): void;
   onDelete(this: void, transaction: FinancialTransaction): void;
 }) {
-  const [pagination, setPagination] = useState<PaginationState>({
-    pageIndex: 0,
-    pageSize: 10
-  });
+  const mobileLoadMoreRef = useRef<HTMLDivElement | null>(null);
   const columns = useMemo<ColumnDef<FinancialTransaction>[]>(
     () => [
       {
@@ -495,26 +609,46 @@ function TransactionsList({
     data: transactions,
     columns,
     getCoreRowModel: getCoreRowModel(),
-    getPaginationRowModel: getPaginationRowModel(),
-    onPaginationChange: setPagination,
+    manualPagination: true,
+    pageCount: Math.ceil(totalRows / pagination.pageSize),
     state: {
       pagination
     }
   });
-  const paginatedTransactions = table
-    .getRowModel()
-    .rows.map((row) => row.original);
+  const hasMoreMobileTransactions = transactions.length < totalRows;
 
   useEffect(() => {
-    setPagination((current) => ({
-      ...current,
-      pageIndex: 0
-    }));
-  }, [transactions]);
+    if (!isMobileViewport || !hasMoreMobileTransactions) {
+      return;
+    }
+
+    const loadMoreTrigger = mobileLoadMoreRef.current;
+
+    if (!loadMoreTrigger || !("IntersectionObserver" in window)) {
+      return;
+    }
+
+    const observer = new IntersectionObserver((entries) => {
+      if (!entries.some((entry) => entry.isIntersecting)) {
+        return;
+      }
+
+      onLoadMore();
+    });
+
+    observer.observe(loadMoreTrigger);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, [hasMoreMobileTransactions, isMobileViewport, onLoadMore]);
 
   return (
     <>
-      <div className="hidden overflow-x-auto rounded-lg border border-border bg-card shadow-sm md:block">
+      <div
+        aria-busy={tableIsLoading}
+        className="relative hidden overflow-x-auto rounded-lg border border-border bg-card shadow-sm md:block"
+      >
         <table className="w-full min-w-[860px] border-collapse text-sm">
           <thead className="bg-muted/70 text-left text-muted-foreground">
             {table.getHeaderGroups().map((headerGroup) => (
@@ -544,10 +678,15 @@ function TransactionsList({
             ))}
           </tbody>
         </table>
+        {tableIsLoading ? (
+          <div className="absolute inset-0 flex items-center justify-center bg-card/70 text-sm font-medium text-muted-foreground">
+            Cargando pagina
+          </div>
+        ) : null}
       </div>
 
-      <div className="grid gap-3 md:hidden">
-        {paginatedTransactions.map((transaction) => (
+      <div aria-busy={tableIsLoading} className="grid gap-3 md:hidden">
+        {transactions.map((transaction) => (
           <article
             key={transaction.id}
             className="rounded-lg border border-border bg-card p-4 shadow-sm"
@@ -592,23 +731,40 @@ function TransactionsList({
             </div>
           </article>
         ))}
+
+        {hasMoreMobileTransactions ? (
+          <div
+            ref={mobileLoadMoreRef}
+            aria-hidden="true"
+            className="h-8"
+          />
+        ) : null}
       </div>
 
-      <TransactionsPagination table={table} totalRows={transactions.length} />
+      <TransactionsPagination
+        pagination={pagination}
+        tableIsLoading={tableIsLoading}
+        totalRows={totalRows}
+        onPaginationChange={onPaginationChange}
+      />
     </>
   );
 }
 
 function TransactionsPagination({
-  table,
-  totalRows
+  pagination,
+  tableIsLoading,
+  totalRows,
+  onPaginationChange
 }: {
-  table: ReturnType<typeof useReactTable<FinancialTransaction>>;
+  pagination: PaginationState;
+  tableIsLoading: boolean;
   totalRows: number;
+  onPaginationChange(this: void, pagination: PaginationState): void;
 }) {
-  const pageCount = table.getPageCount();
-  const pageIndex = table.getState().pagination.pageIndex;
-  const pageSize = table.getState().pagination.pageSize;
+  const pageCount = Math.ceil(totalRows / pagination.pageSize);
+  const pageIndex = pagination.pageIndex;
+  const pageSize = pagination.pageSize;
   const currentPageStart = totalRows === 0 ? 0 : pageIndex * pageSize + 1;
   const currentPageEnd = Math.min((pageIndex + 1) * pageSize, totalRows);
 
@@ -619,7 +775,7 @@ function TransactionsPagination({
   return (
     <nav
       aria-label="Paginacion de movimientos"
-      className="flex flex-col gap-3 rounded-lg border border-border bg-card p-3 text-sm shadow-sm sm:flex-row sm:items-center sm:justify-between"
+      className="hidden flex-col gap-3 rounded-lg border border-border bg-card p-3 text-sm shadow-sm md:flex md:flex-row md:items-center md:justify-between"
     >
       <p className="text-muted-foreground">
         Mostrando {currentPageStart}-{currentPageEnd} de {totalRows}
@@ -634,9 +790,13 @@ function TransactionsPagination({
           <select
             id="transactions-page-size"
             className="h-9 rounded-md border border-input bg-background px-2 text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            disabled={tableIsLoading}
             value={pageSize}
             onChange={(event) => {
-              table.setPageSize(Number(event.target.value));
+              onPaginationChange({
+                pageIndex: 0,
+                pageSize: Number(event.target.value)
+              });
             }}
           >
             {[10, 25, 50].map((size) => (
@@ -653,24 +813,30 @@ function TransactionsPagination({
 
         <Button
           aria-label="Pagina anterior"
-          disabled={!table.getCanPreviousPage()}
+          disabled={tableIsLoading || pageIndex === 0}
           size="icon"
           type="button"
           variant="outline"
           onClick={() => {
-            table.previousPage();
+            onPaginationChange({
+              pageIndex: Math.max(pageIndex - 1, 0),
+              pageSize
+            });
           }}
         >
           <ChevronLeft aria-hidden="true" className="h-4 w-4" />
         </Button>
         <Button
           aria-label="Pagina siguiente"
-          disabled={!table.getCanNextPage()}
+          disabled={tableIsLoading || pageIndex + 1 >= pageCount}
           size="icon"
           type="button"
           variant="outline"
           onClick={() => {
-            table.nextPage();
+            onPaginationChange({
+              pageIndex: pageIndex + 1,
+              pageSize
+            });
           }}
         >
           <ChevronRight aria-hidden="true" className="h-4 w-4" />
