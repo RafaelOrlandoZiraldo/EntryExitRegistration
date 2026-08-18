@@ -55,10 +55,46 @@ interface LocalBackup {
   document: StorageDocument;
 }
 
+interface CatalogCategory {
+  id: string;
+  name: string;
+  description?: string;
+  createdAt: string;
+  updatedAt: string;
+  userId?: string;
+}
+
+interface CatalogArticle {
+  id: string;
+  name: string;
+  categoryId: string;
+  categoryName: string;
+  sku?: string;
+  description?: string;
+  unit?: string;
+  price?: number;
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+  userId?: string;
+}
+
+interface CatalogArticleInput {
+  name: string;
+  categoryId: string;
+  sku?: string;
+  description?: string;
+  unit?: string;
+  price?: number;
+  active?: boolean;
+}
+
 interface LocalApiState {
   document: StorageDocument;
   backups: LocalBackup[];
   users: LocalUser[];
+  catalogCategories: CatalogCategory[];
+  catalogArticles: Omit<CatalogArticle, "categoryName">[];
 }
 
 interface AuthSession {
@@ -370,6 +406,207 @@ async function handleLocalApiRequest(input: {
     return;
   }
 
+  if (pathname === "/api/catalog" && method === "GET") {
+    sendJson(response, 200, getCatalogForSession(state, session));
+    return;
+  }
+
+  if (pathname === "/api/catalog/categories" && method === "POST") {
+    if (session.role !== "user") {
+      sendJson(response, 403, { error: "Forbidden." });
+      return;
+    }
+
+    const input = readCategoryInput(await readJsonBody(request));
+
+    if (input === null) {
+      sendJson(response, 400, { error: "Invalid category." });
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const category: CatalogCategory = {
+      id: crypto.randomUUID(),
+      name: input.name,
+      ...(input.description ? { description: input.description } : {}),
+      createdAt: now,
+      updatedAt: now,
+      userId: session.userId
+    };
+
+    state.catalogCategories.push(category);
+    await writeState(dataFilePath, state);
+    sendJson(response, 201, { category });
+    return;
+  }
+
+  const categoryRoute = pathname.match(/^\/api\/catalog\/categories\/([^/]+)$/);
+
+  if (categoryRoute && method === "PUT") {
+    if (session.role !== "user") {
+      sendJson(response, 403, { error: "Forbidden." });
+      return;
+    }
+
+    const id = decodeURIComponent(categoryRoute[1]);
+    const input = readCategoryInput(await readJsonBody(request));
+
+    if (input === null) {
+      sendJson(response, 400, { error: "Invalid category." });
+      return;
+    }
+
+    const categoryIndex = state.catalogCategories.findIndex(
+      (category) => category.id === id && category.userId === session.userId
+    );
+
+    if (categoryIndex === -1) {
+      sendJson(response, 404, { error: "Not found." });
+      return;
+    }
+
+    state.catalogCategories[categoryIndex] = {
+      ...state.catalogCategories[categoryIndex],
+      name: input.name,
+      ...(input.description ? { description: input.description } : {}),
+      ...(!input.description ? { description: undefined } : {}),
+      updatedAt: new Date().toISOString()
+    };
+    await writeState(dataFilePath, state);
+    sendJson(response, 200, { category: state.catalogCategories[categoryIndex] });
+    return;
+  }
+
+  if (categoryRoute && method === "DELETE") {
+    if (session.role !== "user") {
+      sendJson(response, 403, { error: "Forbidden." });
+      return;
+    }
+
+    const id = decodeURIComponent(categoryRoute[1]);
+    const hasArticles = state.catalogArticles.some(
+      (article) => article.categoryId === id && article.userId === session.userId
+    );
+
+    if (hasArticles) {
+      sendJson(response, 409, { error: "Category has articles." });
+      return;
+    }
+
+    state.catalogCategories = state.catalogCategories.filter(
+      (category) => category.id !== id || category.userId !== session.userId
+    );
+    await writeState(dataFilePath, state);
+    sendJson(response, 200, { ok: true });
+    return;
+  }
+
+  if (pathname === "/api/catalog/articles" && method === "POST") {
+    if (session.role !== "user") {
+      sendJson(response, 403, { error: "Forbidden." });
+      return;
+    }
+
+    const input = readArticleInput(await readJsonBody(request));
+
+    if (
+      input === null ||
+      !state.catalogCategories.some(
+        (category) =>
+          category.id === input.categoryId && category.userId === session.userId
+      )
+    ) {
+      sendJson(response, 400, { error: "Invalid article." });
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const article: Omit<CatalogArticle, "categoryName"> = {
+      id: crypto.randomUUID(),
+      name: input.name,
+      categoryId: input.categoryId,
+      ...(input.sku ? { sku: input.sku } : {}),
+      ...(input.description ? { description: input.description } : {}),
+      ...(input.unit ? { unit: input.unit } : {}),
+      ...(typeof input.price === "number" ? { price: input.price } : {}),
+      active: input.active !== false,
+      createdAt: now,
+      updatedAt: now,
+      userId: session.userId
+    };
+
+    state.catalogArticles.push(article);
+    await writeState(dataFilePath, state);
+    sendJson(response, 201, {
+      article: hydrateCatalogArticle(state, article)
+    });
+    return;
+  }
+
+  const articleRoute = pathname.match(/^\/api\/catalog\/articles\/([^/]+)$/);
+
+  if (articleRoute && method === "PUT") {
+    if (session.role !== "user") {
+      sendJson(response, 403, { error: "Forbidden." });
+      return;
+    }
+
+    const id = decodeURIComponent(articleRoute[1]);
+    const input = readArticleInput(await readJsonBody(request));
+
+    if (
+      input === null ||
+      !state.catalogCategories.some(
+        (category) =>
+          category.id === input.categoryId && category.userId === session.userId
+      )
+    ) {
+      sendJson(response, 400, { error: "Invalid article." });
+      return;
+    }
+
+    const articleIndex = state.catalogArticles.findIndex(
+      (article) => article.id === id && article.userId === session.userId
+    );
+
+    if (articleIndex === -1) {
+      sendJson(response, 404, { error: "Not found." });
+      return;
+    }
+
+    state.catalogArticles[articleIndex] = {
+      ...state.catalogArticles[articleIndex],
+      name: input.name,
+      categoryId: input.categoryId,
+      sku: input.sku,
+      description: input.description,
+      unit: input.unit,
+      price: input.price,
+      active: input.active !== false,
+      updatedAt: new Date().toISOString()
+    };
+    await writeState(dataFilePath, state);
+    sendJson(response, 200, {
+      article: hydrateCatalogArticle(state, state.catalogArticles[articleIndex])
+    });
+    return;
+  }
+
+  if (articleRoute && method === "DELETE") {
+    if (session.role !== "user") {
+      sendJson(response, 403, { error: "Forbidden." });
+      return;
+    }
+
+    const id = decodeURIComponent(articleRoute[1]);
+    state.catalogArticles = state.catalogArticles.filter(
+      (article) => article.id !== id || article.userId !== session.userId
+    );
+    await writeState(dataFilePath, state);
+    sendJson(response, 200, { ok: true });
+    return;
+  }
+
   const transactionRoute = pathname.match(/^\/api\/transactions\/([^/]+)$/);
 
   if (transactionRoute && method === "PUT") {
@@ -454,6 +691,8 @@ async function readState(filePath: string): Promise<LocalApiState> {
       return {
         ...parsed,
         users: parsed.users ?? [],
+        catalogCategories: parsed.catalogCategories ?? [],
+        catalogArticles: parsed.catalogArticles ?? [],
         document: {
           ...parsed.document,
           transactions: parsed.document.transactions
@@ -480,7 +719,9 @@ function createEmptyState(): LocalApiState {
       transactions: []
     },
     backups: [],
-    users: []
+    users: [],
+    catalogCategories: [],
+    catalogArticles: []
   };
 }
 
@@ -644,12 +885,105 @@ function getDocumentForSession(
   };
 }
 
+function getCatalogForSession(state: LocalApiState, session: AuthSession) {
+  const categories = state.catalogCategories
+    .filter(
+      (category) =>
+        session.role === "admin" || category.userId === session.userId
+    )
+    .sort((left, right) => left.name.localeCompare(right.name));
+  const categoryIds = new Set(categories.map((category) => category.id));
+  const articles = state.catalogArticles
+    .filter(
+      (article) =>
+        categoryIds.has(article.categoryId) &&
+        (session.role === "admin" || article.userId === session.userId)
+    )
+    .map((article) => hydrateCatalogArticle(state, article))
+    .sort((left, right) => left.name.localeCompare(right.name));
+
+  return { categories, articles };
+}
+
+function hydrateCatalogArticle(
+  state: LocalApiState,
+  article: Omit<CatalogArticle, "categoryName">
+): CatalogArticle {
+  const category = state.catalogCategories.find(
+    (current) => current.id === article.categoryId
+  );
+
+  return {
+    ...article,
+    categoryName: category?.name ?? "Sin categoria"
+  };
+}
+
 function stripUserSecrets(user: LocalUser) {
   return {
     id: user.id,
     username: user.username,
     role: user.role,
     createdAt: user.createdAt
+  };
+}
+
+function readCategoryInput(
+  value: unknown
+): Pick<CatalogCategory, "name" | "description"> | null {
+  if (!isRecord(value) || typeof value.name !== "string") {
+    return null;
+  }
+
+  const name = value.name.trim();
+
+  if (name.length === 0) {
+    return null;
+  }
+
+  return {
+    name,
+    ...(typeof value.description === "string" && value.description.trim()
+      ? { description: value.description.trim() }
+      : {})
+  };
+}
+
+function readArticleInput(value: unknown): CatalogArticleInput | null {
+  if (
+    !isRecord(value) ||
+    typeof value.name !== "string" ||
+    typeof value.categoryId !== "string"
+  ) {
+    return null;
+  }
+
+  const name = value.name.trim();
+  const categoryId = value.categoryId.trim();
+
+  if (
+    name.length === 0 ||
+    categoryId.length === 0 ||
+    (value.price !== undefined &&
+      (typeof value.price !== "number" || value.price < 0))
+  ) {
+    return null;
+  }
+
+  return {
+    name,
+    categoryId,
+    ...(typeof value.sku === "string" && value.sku.trim()
+      ? { sku: value.sku.trim() }
+      : {}),
+    ...(typeof value.description === "string" && value.description.trim()
+      ? { description: value.description.trim() }
+      : {}),
+    ...(typeof value.unit === "string" && value.unit.trim()
+      ? { unit: value.unit.trim() }
+      : {}),
+    ...(typeof value.price === "number" ? { price: value.price } : {}),
+    ...(typeof value.active === "boolean" ? { active: value.active } : {})
   };
 }
 
@@ -721,7 +1055,10 @@ function isState(value: unknown): value is LocalApiState {
     isRecord(value) &&
     readDocument(value.document) !== null &&
     Array.isArray(value.backups) &&
-    (!("users" in value) || Array.isArray(value.users))
+    (!("users" in value) || Array.isArray(value.users)) &&
+    (!("catalogCategories" in value) ||
+      Array.isArray(value.catalogCategories)) &&
+    (!("catalogArticles" in value) || Array.isArray(value.catalogArticles))
   );
 }
 

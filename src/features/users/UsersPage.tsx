@@ -7,7 +7,8 @@ import {
   EmptyState,
   ErrorState,
   LoadingState,
-  PageTitle
+  PageTitle,
+  useToast
 } from "@shared/ui";
 
 interface UsersPageProps {
@@ -30,8 +31,8 @@ export function UsersPage({ usersService }: UsersPageProps) {
     password: "",
     role: "user"
   });
-  const [feedback, setFeedback] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const { notify } = useToast();
 
   const loadUsers = useCallback(() => {
     setState({ status: "loading" });
@@ -65,12 +66,13 @@ export function UsersPage({ usersService }: UsersPageProps) {
 
   const submitUser = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    setFeedback(null);
 
     if (form.username.trim().length === 0 || form.password.length < 8) {
-      setFeedback(
-        "El usuario es obligatorio y la contraseña debe tener al menos 8 caracteres."
-      );
+      notify({
+        type: "warning",
+        message:
+          "El usuario es obligatorio y la contrasena debe tener al menos 8 caracteres."
+      });
       return;
     }
 
@@ -83,10 +85,13 @@ export function UsersPage({ usersService }: UsersPageProps) {
         role: form.role
       });
       setForm({ username: "", password: "", role: "user" });
-      setFeedback("Usuario creado correctamente.");
+      notify({ type: "success", message: "Usuario creado correctamente." });
       loadUsers();
     } catch {
-      setFeedback("No se pudo crear el usuario. Revisá que el nombre no exista.");
+      notify({
+        type: "error",
+        message: "No se pudo crear el usuario. Revisa que el nombre no exista."
+      });
     } finally {
       setIsSubmitting(false);
     }
@@ -118,7 +123,7 @@ export function UsersPage({ usersService }: UsersPageProps) {
           />
         </label>
         <label className="grid gap-2 text-sm font-medium">
-          Contraseña
+          Contrasena
           <input
             className="h-10 rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
             minLength={8}
@@ -154,12 +159,6 @@ export function UsersPage({ usersService }: UsersPageProps) {
         </Button>
       </form>
 
-      {feedback ? (
-        <p className="rounded-md border border-border bg-card p-3 text-sm text-muted-foreground">
-          {feedback}
-        </p>
-      ) : null}
-
       {state.status === "loading" ? (
         <LoadingState title="Cargando usuarios" />
       ) : null}
@@ -174,7 +173,10 @@ export function UsersPage({ usersService }: UsersPageProps) {
       ) : null}
 
       {state.status === "success" && state.users.length === 0 ? (
-        <EmptyState title="Sin usuarios" message="Todavia no hay usuarios registrados." />
+        <EmptyState
+          title="Sin usuarios"
+          message="Todavia no hay usuarios registrados."
+        />
       ) : null}
 
       {state.status === "success" && state.users.length > 0 ? (

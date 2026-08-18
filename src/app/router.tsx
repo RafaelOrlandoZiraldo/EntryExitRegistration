@@ -1,10 +1,18 @@
 import { Navigate, createBrowserRouter } from "react-router-dom";
 import { mapErrorToUserMessage } from "@app/errors/errorMessages";
 import { authServices } from "@app/services/auth";
+import { catalogServices } from "@app/services/catalog";
 import { transactionServices } from "@app/services/transactions";
 import { userServices } from "@app/services/users";
 import { AppShell } from "@app/shell/AppShell";
-import { LoginPage, ProtectedRoute } from "@features/auth";
+import {
+  AdminOnlyRoute,
+  HomeRedirect,
+  LoginPage,
+  ProtectedRoute,
+  UserOnlyRoute
+} from "@features/auth";
+import { CatalogPage } from "@features/catalog";
 import { TransactionsPage } from "@features/transactions";
 import { UsersPage } from "@features/users";
 
@@ -22,43 +30,67 @@ export const router = createBrowserRouter([
         children: [
           {
             index: true,
-            element: <Navigate to="/transactions" replace />
+            element: <HomeRedirect />
           },
           {
-            path: "transactions",
-            element: (
-              <TransactionsPage
-                createTransactionUseCase={
-                  transactionServices.createTransaction
-                }
-                deleteTransactionUseCase={
-                  transactionServices.deleteTransaction
-                }
-                deleteAllTransactionsUseCase={
-                  transactionServices.deleteAllTransactions
-                }
-                downloadFile={transactionServices.downloadFile}
-                exportStorageDocumentUseCase={
-                  transactionServices.exportStorageDocument
-                }
-                getTransactionsUseCase={transactionServices.getTransactions}
-                importStorageDocumentUseCase={
-                  transactionServices.importStorageDocument
-                }
-                mapError={mapErrorToUserMessage}
-                previewImportStorageDocumentUseCase={
-                  transactionServices.previewImportStorageDocument
-                }
-                updateTransactionUseCase={
-                  transactionServices.updateTransaction
-                }
-                verifyPasswordUseCase={authServices.verifyPassword}
-              />
-            )
+            element: <UserOnlyRoute />,
+            children: [
+              {
+                path: "transactions",
+                element: (
+                  <TransactionsPage
+                    createTransactionUseCase={
+                      transactionServices.createTransaction
+                    }
+                    deleteTransactionUseCase={
+                      transactionServices.deleteTransaction
+                    }
+                    deleteAllTransactionsUseCase={
+                      transactionServices.deleteAllTransactions
+                    }
+                    downloadFile={transactionServices.downloadFile}
+                    exportStorageDocumentUseCase={
+                      transactionServices.exportStorageDocument
+                    }
+                    getTransactionsUseCase={transactionServices.getTransactions}
+                    importStorageDocumentUseCase={
+                      transactionServices.importStorageDocument
+                    }
+                    mapError={mapErrorToUserMessage}
+                    previewImportStorageDocumentUseCase={
+                      transactionServices.previewImportStorageDocument
+                    }
+                    updateTransactionUseCase={
+                      transactionServices.updateTransaction
+                    }
+                    verifyPasswordUseCase={authServices.verifyPassword}
+                  />
+                )
+              },
+              {
+                path: "catalog",
+                element: (
+                  <CatalogPage catalogService={catalogServices.catalog} />
+                )
+              }
+            ]
           },
           {
-            path: "users",
-            element: <UsersPage usersService={userServices.users} />
+            element: <AdminOnlyRoute />,
+            children: [
+              {
+                path: "users",
+                element: <UsersPage usersService={userServices.users} />
+              },
+              {
+                path: "user",
+                element: <Navigate to="/users" replace />
+              }
+            ]
+          },
+          {
+            path: "*",
+            element: <HomeRedirect />
           }
         ]
       }
