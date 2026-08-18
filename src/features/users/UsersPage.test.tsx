@@ -1,6 +1,8 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type React from "react";
 import { describe, expect, it, vi } from "vitest";
+import { ToastProvider } from "@shared/ui";
 import { UsersPage } from "./UsersPage";
 
 const authMock = vi.hoisted(() => ({
@@ -29,6 +31,10 @@ vi.mock("@features/auth", async (importOriginal) => {
   };
 });
 
+function renderWithToast(ui: React.ReactElement) {
+  return render(<ToastProvider>{ui}</ToastProvider>);
+}
+
 describe("UsersPage", () => {
   it("UsersPage_WhenAdminCreatesUser_ShouldPersistAndReloadList", async () => {
     const usersService = {
@@ -52,10 +58,10 @@ describe("UsersPage", () => {
     };
     const user = userEvent.setup();
 
-    render(<UsersPage usersService={usersService} />);
+    renderWithToast(<UsersPage usersService={usersService} />);
 
     await user.type(await screen.findByLabelText("Usuario"), "rafa");
-    await user.type(screen.getByLabelText("Contraseña"), "password123");
+    await user.type(screen.getByLabelText("Contrasena"), "password123");
     await user.click(screen.getByRole("button", { name: "Crear" }));
 
     await waitFor(() => {
@@ -65,14 +71,16 @@ describe("UsersPage", () => {
         role: "user"
       });
     });
-    expect(await screen.findByText("Usuario creado correctamente.")).toBeInTheDocument();
+    expect(
+      await screen.findByText("Usuario creado correctamente.")
+    ).toBeInTheDocument();
     expect(await screen.findByText("rafa")).toBeInTheDocument();
   });
 
   it("UsersPage_WhenRegularUserOpensPage_ShouldShowRestrictedAccess", () => {
     authMock.role = "user";
 
-    render(
+    renderWithToast(
       <UsersPage
         usersService={{
           list: vi.fn(),

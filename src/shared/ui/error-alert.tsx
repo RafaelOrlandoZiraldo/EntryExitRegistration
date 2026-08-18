@@ -1,4 +1,5 @@
 import { AlertCircle } from "lucide-react";
+import { useEffect, useState } from "react";
 import { cn } from "@shared/lib/utils";
 
 export interface ErrorAlertProps {
@@ -8,10 +9,27 @@ export interface ErrorAlertProps {
 }
 
 export function ErrorAlert({ title, message, className }: ErrorAlertProps) {
+  const [isVisible, setIsVisible] = useState(true);
+
+  useEffect(() => {
+    setIsVisible(true);
+    const timeoutId = window.setTimeout(() => {
+      setIsVisible(false);
+    }, 2_000);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [message, title]);
+
+  if (!isVisible) {
+    return null;
+  }
+
   return (
     <div
       className={cn(
-        "rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive",
+        "fixed inset-x-4 bottom-4 z-[60] mx-auto w-auto max-w-md rounded-lg border border-destructive/40 bg-destructive px-4 py-3 text-sm text-destructive-foreground shadow-lg sm:bottom-6",
         className
       )}
       role="alert"

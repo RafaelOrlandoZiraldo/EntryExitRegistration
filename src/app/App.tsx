@@ -5,16 +5,19 @@ import { authServices } from "@app/services/auth";
 import { DailyBackupRunner } from "@app/services/DailyBackupRunner";
 import { transactionServices } from "@app/services/transactions";
 import { AuthProvider } from "@features/auth";
+import { ToastProvider } from "@shared/ui";
 
 export function App() {
   return (
     <AppErrorBoundary>
-      <AuthProvider dependencies={authServices.dependencies}>
-        <DailyBackupRunner
-          createDailyBackupUseCase={transactionServices.createDailyBackup}
-        />
-        <RouterProvider router={router} />
-      </AuthProvider>
+      <ToastProvider>
+        <AuthProvider dependencies={authServices.dependencies}>
+          <DailyBackupRunner
+            createDailyBackupUseCase={transactionServices.createDailyBackup}
+          />
+          <RouterProvider router={router} />
+        </AuthProvider>
+      </ToastProvider>
     </AppErrorBoundary>
   );
 }

@@ -1,10 +1,11 @@
 import { Link, Outlet } from "react-router-dom";
-import { LogOut, Users, WalletCards } from "lucide-react";
+import { Boxes, LogOut, Users, WalletCards } from "lucide-react";
 import { useAuth } from "@features/auth";
 import { Button } from "@shared/ui/button";
 
 export function AppShell() {
   const auth = useAuth();
+  const isAdmin = auth.session?.role === "admin";
 
   return (
     <div className="min-h-dvh bg-background text-foreground">
@@ -25,10 +26,20 @@ export function AppShell() {
           </div>
 
           <div className="flex items-center gap-2">
-            <Button asChild variant="ghost">
-              <Link to="/transactions">Movimientos</Link>
-            </Button>
-            {auth.session?.role === "admin" ? (
+            {!isAdmin ? (
+              <>
+                <Button asChild variant="ghost">
+                  <Link to="/transactions">Movimientos</Link>
+                </Button>
+                <Button asChild variant="ghost">
+                  <Link to="/catalog">
+                    <Boxes aria-hidden="true" className="mr-2 h-4 w-4" />
+                    Catalogo
+                  </Link>
+                </Button>
+              </>
+            ) : null}
+            {isAdmin ? (
               <Button asChild variant="ghost">
                 <Link to="/users">
                   <Users aria-hidden="true" className="mr-2 h-4 w-4" />
