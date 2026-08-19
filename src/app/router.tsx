@@ -2,6 +2,7 @@ import { Navigate, createBrowserRouter } from "react-router-dom";
 import { mapErrorToUserMessage } from "@app/errors/errorMessages";
 import { authServices } from "@app/services/auth";
 import { catalogServices } from "@app/services/catalog";
+import { inventoryServices } from "@app/services/inventory";
 import { transactionServices } from "@app/services/transactions";
 import { userServices } from "@app/services/users";
 import { AppShell } from "@app/shell/AppShell";
@@ -13,6 +14,7 @@ import {
   UserOnlyRoute
 } from "@features/auth";
 import { CatalogPage } from "@features/catalog";
+import { InventoryPage } from "@features/inventory";
 import { TransactionsPage } from "@features/transactions";
 import { UsersPage } from "@features/users";
 
@@ -71,6 +73,14 @@ export const router = createBrowserRouter([
                 path: "catalog",
                 element: (
                   <CatalogPage catalogService={catalogServices.catalog} />
+                )
+              },
+              {
+                path: "inventory",
+                element: (
+                  <InventoryPage
+                    inventoryService={inventoryServices.inventory}
+                  />
                 )
               }
             ]

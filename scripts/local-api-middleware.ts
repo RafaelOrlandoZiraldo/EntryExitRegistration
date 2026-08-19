@@ -89,12 +89,34 @@ interface CatalogArticleInput {
   active?: boolean;
 }
 
+type InventoryMovementType = "in" | "out" | "adjustment";
+
+interface InventoryMovement {
+  id: string;
+  articleId: string;
+  type: InventoryMovementType;
+  quantity: number;
+  reason: string;
+  notes?: string;
+  createdAt: string;
+  userId?: string;
+}
+
+interface InventoryMovementInput {
+  articleId: string;
+  type: InventoryMovementType;
+  quantity: number;
+  reason: string;
+  notes?: string;
+}
+
 interface LocalApiState {
   document: StorageDocument;
   backups: LocalBackup[];
   users: LocalUser[];
   catalogCategories: CatalogCategory[];
   catalogArticles: Omit<CatalogArticle, "categoryName">[];
+  inventoryMovements: InventoryMovement[];
 }
 
 interface AuthSession {
@@ -607,6 +629,48 @@ async function handleLocalApiRequest(input: {
     return;
   }
 
+  if (pathname === "/api/inventory" && method === "GET") {
+    sendJson(response, 200, getInventoryForSession(state, session));
+    return;
+  }
+
+  if (pathname === "/api/inventory/movements" && method === "POST") {
+    if (session.role !== "user") {
+      sendJson(response, 403, { error: "Forbidden." });
+      return;
+    }
+
+    const input = readInventoryMovementInput(await readJsonBody(request));
+
+    if (
+      input === null ||
+      !state.catalogArticles.some(
+        (article) => article.id === input.articleId && article.userId === session.userId
+      )
+    ) {
+      sendJson(response, 400, { error: "Invalid inventory movement." });
+      return;
+    }
+
+    const movement: InventoryMovement = {
+      id: crypto.randomUUID(),
+      articleId: input.articleId,
+      type: input.type,
+      quantity: input.quantity,
+      reason: input.reason,
+      ...(input.notes ? { notes: input.notes } : {}),
+      createdAt: new Date().toISOString(),
+      userId: session.userId
+    };
+
+    state.inventoryMovements.push(movement);
+    await writeState(dataFilePath, state);
+    sendJson(response, 201, {
+      movement: hydrateInventoryMovement(state, movement)
+    });
+    return;
+  }
+
   const transactionRoute = pathname.match(/^\/api\/transactions\/([^/]+)$/);
 
   if (transactionRoute && method === "PUT") {
@@ -693,6 +757,7 @@ async function readState(filePath: string): Promise<LocalApiState> {
         users: parsed.users ?? [],
         catalogCategories: parsed.catalogCategories ?? [],
         catalogArticles: parsed.catalogArticles ?? [],
+        inventoryMovements: parsed.inventoryMovements ?? [],
         document: {
           ...parsed.document,
           transactions: parsed.document.transactions
@@ -721,7 +786,8 @@ function createEmptyState(): LocalApiState {
     backups: [],
     users: [],
     catalogCategories: [],
-    catalogArticles: []
+    catalogArticles: [],
+    inventoryMovements: []
   };
 }
 
@@ -919,6 +985,69 @@ function hydrateCatalogArticle(
   };
 }
 
+function getInventoryForSession(state: LocalApiState, session: AuthSession) {
+  const catalog = getCatalogForSession(state, session);
+  const articleIds = new Set(catalog.articles.map((article) => article.id));
+  const movements = state.inventoryMovements.filter(
+    (movement) =>
+      articleIds.has(movement.articleId) &&
+      (session.role === "admin" || movement.userId === session.userId)
+  );
+  const quantities = movements.reduce<Record<string, number>>((current, movement) => {
+    const signedQuantity =
+      movement.type === "in"
+        ? movement.quantity
+        : movement.type === "out"
+          ? -movement.quantity
+          : movement.quantity;
+
+    current[movement.articleId] =
+      (current[movement.articleId] ?? 0) + signedQuantity;
+    return current;
+  }, {});
+
+  return {
+    items: catalog.articles.map((article) => ({
+      articleId: article.id,
+      articleName: article.name,
+      categoryName: article.categoryName,
+      ...(article.sku ? { sku: article.sku } : {}),
+      ...(article.unit ? { unit: article.unit } : {}),
+      active: article.active,
+      quantity: quantities[article.id] ?? 0
+    })),
+    movements: movements
+      .map((movement) => hydrateInventoryMovement(state, movement))
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+      .slice(0, 100)
+  };
+}
+
+function hydrateInventoryMovement(
+  state: LocalApiState,
+  movement: InventoryMovement
+) {
+  const article = state.catalogArticles.find(
+    (current) => current.id === movement.articleId
+  );
+  const category = article
+    ? state.catalogCategories.find((current) => current.id === article.categoryId)
+    : null;
+
+  return {
+    id: movement.id,
+    articleId: movement.articleId,
+    articleName: article?.name ?? "Producto eliminado",
+    categoryName: category?.name ?? "Sin categoria",
+    type: movement.type,
+    quantity: movement.quantity,
+    reason: movement.reason,
+    ...(movement.notes ? { notes: movement.notes } : {}),
+    createdAt: movement.createdAt,
+    ...(movement.userId ? { userId: movement.userId } : {})
+  };
+}
+
 function stripUserSecrets(user: LocalUser) {
   return {
     id: user.id,
@@ -985,6 +1114,47 @@ function readArticleInput(value: unknown): CatalogArticleInput | null {
     ...(typeof value.price === "number" ? { price: value.price } : {}),
     ...(typeof value.active === "boolean" ? { active: value.active } : {})
   };
+}
+
+function readInventoryMovementInput(
+  value: unknown
+): InventoryMovementInput | null {
+  if (
+    !isRecord(value) ||
+    typeof value.articleId !== "string" ||
+    !isInventoryMovementType(value.type) ||
+    typeof value.quantity !== "number" ||
+    typeof value.reason !== "string"
+  ) {
+    return null;
+  }
+
+  const articleId = value.articleId.trim();
+  const reason = value.reason.trim();
+
+  if (
+    articleId.length === 0 ||
+    reason.length === 0 ||
+    !Number.isFinite(value.quantity) ||
+    value.quantity === 0 ||
+    (value.type !== "adjustment" && value.quantity <= 0)
+  ) {
+    return null;
+  }
+
+  return {
+    articleId,
+    type: value.type,
+    quantity: value.quantity,
+    reason,
+    ...(typeof value.notes === "string" && value.notes.trim()
+      ? { notes: value.notes.trim() }
+      : {})
+  };
+}
+
+function isInventoryMovementType(value: unknown): value is InventoryMovementType {
+  return value === "in" || value === "out" || value === "adjustment";
 }
 
 function readTransaction(value: unknown): FinancialTransaction | null {
@@ -1058,7 +1228,9 @@ function isState(value: unknown): value is LocalApiState {
     (!("users" in value) || Array.isArray(value.users)) &&
     (!("catalogCategories" in value) ||
       Array.isArray(value.catalogCategories)) &&
-    (!("catalogArticles" in value) || Array.isArray(value.catalogArticles))
+    (!("catalogArticles" in value) || Array.isArray(value.catalogArticles)) &&
+    (!("inventoryMovements" in value) ||
+      Array.isArray(value.inventoryMovements))
   );
 }
 

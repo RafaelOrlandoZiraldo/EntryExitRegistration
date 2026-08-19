@@ -1,5 +1,5 @@
 import { Link, Outlet } from "react-router-dom";
-import { Boxes, LogOut, Users, WalletCards } from "lucide-react";
+import { Boxes, ClipboardList, LogOut, Users, WalletCards } from "lucide-react";
 import { useAuth } from "@features/auth";
 import { Button } from "@shared/ui/button";
 
@@ -35,6 +35,12 @@ export function AppShell() {
                   <Link to="/catalog">
                     <Boxes aria-hidden="true" className="mr-2 h-4 w-4" />
                     Catalogo
+                  </Link>
+                </Button>
+                <Button asChild variant="ghost">
+                  <Link to="/inventory">
+                    <ClipboardList aria-hidden="true" className="mr-2 h-4 w-4" />
+                    Inventario
                   </Link>
                 </Button>
               </>
