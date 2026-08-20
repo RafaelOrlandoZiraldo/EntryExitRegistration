@@ -6,7 +6,7 @@ export function HomeRedirect() {
 
   return (
     <Navigate
-      to={auth.session?.role === "admin" ? "/users" : "/transactions"}
+      to={auth.session?.role === "admin" ? "/users" : "/dashboard"}
       replace
     />
   );

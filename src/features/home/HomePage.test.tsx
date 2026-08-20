@@ -4,20 +4,37 @@ import { describe, expect, it } from "vitest";
 import { HomePage } from "./HomePage";
 
 describe("HomePage", () => {
-  it("HomePage_WhenRendered_ShouldShowTemporaryRoute", () => {
+  it("HomePage_WhenRendered_ShouldShowDashboardSummary", async () => {
     render(
       <MemoryRouter>
-        <HomePage />
+        <HomePage
+          catalogService={{
+            list: () => Promise.resolve({
+              categories: [],
+              articles: []
+            })
+          }}
+          getTransactionsUseCase={{
+            execute: () => Promise.resolve([])
+          }}
+          inventoryService={{
+            list: () => Promise.resolve({
+              items: [],
+              movements: []
+            })
+          }}
+          ordersService={{
+            list: () => Promise.resolve({
+              orders: []
+            })
+          }}
+        />
       </MemoryRouter>
     );
 
     expect(
-      screen.getByRole("heading", {
-        name: /registro domestico de ingresos y egresos/i
-      })
+      await screen.findByRole("heading", { name: /dashboard general/i })
     ).toBeInTheDocument();
-    expect(screen.getByText("Sin movimientos registrados")).toBeInTheDocument();
-    expect(screen.getByText("Ingreso")).toBeInTheDocument();
-    expect(screen.getByText("Egreso")).toBeInTheDocument();
+    expect(screen.getByText("Sin informacion cargada")).toBeInTheDocument();
   });
 });

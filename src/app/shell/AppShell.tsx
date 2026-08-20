@@ -2,6 +2,7 @@ import { Link, Outlet } from "react-router-dom";
 import {
   Boxes,
   ClipboardList,
+  LayoutDashboard,
   LogOut,
   ShoppingCart,
   Users,
@@ -35,6 +36,15 @@ export function AppShell() {
           <div className="flex items-center gap-2">
             {!isAdmin ? (
               <>
+                <Button asChild variant="ghost">
+                  <Link to="/dashboard">
+                    <LayoutDashboard
+                      aria-hidden="true"
+                      className="mr-2 h-4 w-4"
+                    />
+                    Inicio
+                  </Link>
+                </Button>
                 <Button asChild variant="ghost">
                   <Link to="/transactions">Movimientos</Link>
                 </Button>
