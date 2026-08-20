@@ -15,6 +15,7 @@ import {
   UserOnlyRoute
 } from "@features/auth";
 import { CatalogPage } from "@features/catalog";
+import { HomePage } from "@features/home/HomePage";
 import { InventoryPage } from "@features/inventory";
 import { OrdersPage } from "@features/orders";
 import { TransactionsPage } from "@features/transactions";
@@ -39,6 +40,17 @@ export const router = createBrowserRouter([
           {
             element: <UserOnlyRoute />,
             children: [
+              {
+                path: "dashboard",
+                element: (
+                  <HomePage
+                    catalogService={catalogServices.catalog}
+                    getTransactionsUseCase={transactionServices.getTransactions}
+                    inventoryService={inventoryServices.inventory}
+                    ordersService={orderServices.orders}
+                  />
+                )
+              },
               {
                 path: "transactions",
                 element: (
