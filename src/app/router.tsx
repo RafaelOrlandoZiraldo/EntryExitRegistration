@@ -3,6 +3,7 @@ import { mapErrorToUserMessage } from "@app/errors/errorMessages";
 import { authServices } from "@app/services/auth";
 import { catalogServices } from "@app/services/catalog";
 import { inventoryServices } from "@app/services/inventory";
+import { orderServices } from "@app/services/orders";
 import { transactionServices } from "@app/services/transactions";
 import { userServices } from "@app/services/users";
 import { AppShell } from "@app/shell/AppShell";
@@ -15,6 +16,7 @@ import {
 } from "@features/auth";
 import { CatalogPage } from "@features/catalog";
 import { InventoryPage } from "@features/inventory";
+import { OrdersPage } from "@features/orders";
 import { TransactionsPage } from "@features/transactions";
 import { UsersPage } from "@features/users";
 
@@ -80,6 +82,15 @@ export const router = createBrowserRouter([
                 element: (
                   <InventoryPage
                     inventoryService={inventoryServices.inventory}
+                  />
+                )
+              },
+              {
+                path: "orders",
+                element: (
+                  <OrdersPage
+                    inventoryService={inventoryServices.inventory}
+                    ordersService={orderServices.orders}
                   />
                 )
               }

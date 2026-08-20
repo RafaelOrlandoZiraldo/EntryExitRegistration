@@ -8,6 +8,7 @@ export interface InventoryItem {
   categoryName: string;
   sku?: string;
   unit?: string;
+  price?: number;
   active: boolean;
   quantity: number;
 }
@@ -39,6 +40,7 @@ interface InventoryItemRow {
   category_name: string;
   sku: string | null;
   unit: string | null;
+  price: number | null;
   active: number;
   quantity: number | null;
 }
@@ -68,7 +70,7 @@ export async function listInventoryItems(db: D1Database, session: AuthSession) {
     session.role === "admin"
       ? db.prepare(
           `SELECT a.id AS article_id, a.name AS article_name,
-                  c.name AS category_name, a.sku, a.unit, a.active,
+                  c.name AS category_name, a.sku, a.unit, a.price, a.active,
                   COALESCE(SUM(
                     CASE m.type
                       WHEN 'in' THEN m.quantity
@@ -79,13 +81,13 @@ export async function listInventoryItems(db: D1Database, session: AuthSession) {
            FROM catalog_articles a
            INNER JOIN catalog_categories c ON c.id = a.category_id
            LEFT JOIN inventory_movements m ON m.article_id = a.id
-           GROUP BY a.id, a.name, c.name, a.sku, a.unit, a.active
+           GROUP BY a.id, a.name, c.name, a.sku, a.unit, a.price, a.active
            ORDER BY a.name COLLATE NOCASE`
         )
       : db
           .prepare(
             `SELECT a.id AS article_id, a.name AS article_name,
-                    c.name AS category_name, a.sku, a.unit, a.active,
+                    c.name AS category_name, a.sku, a.unit, a.price, a.active,
                     COALESCE(SUM(
                       CASE m.type
                         WHEN 'in' THEN m.quantity
@@ -97,7 +99,7 @@ export async function listInventoryItems(db: D1Database, session: AuthSession) {
              INNER JOIN catalog_categories c ON c.id = a.category_id
              LEFT JOIN inventory_movements m ON m.article_id = a.id
              WHERE a.user_id = ?
-             GROUP BY a.id, a.name, c.name, a.sku, a.unit, a.active
+             GROUP BY a.id, a.name, c.name, a.sku, a.unit, a.price, a.active
              ORDER BY a.name COLLATE NOCASE`
           )
           .bind(session.userId);
@@ -251,6 +253,7 @@ function mapInventoryItemRow(row: InventoryItemRow): InventoryItem {
     categoryName: row.category_name,
     ...(row.sku ? { sku: row.sku } : {}),
     ...(row.unit ? { unit: row.unit } : {}),
+    ...(row.price !== null ? { price: row.price } : {}),
     active: row.active === 1,
     quantity: row.quantity ?? 0
   };

@@ -110,6 +110,44 @@ interface InventoryMovementInput {
   notes?: string;
 }
 
+type OrderStatus = "pending" | "confirmed" | "delivered" | "cancelled";
+
+interface OrderItem {
+  id: string;
+  orderId: string;
+  articleId: string;
+  articleName: string;
+  quantity: number;
+  unitPrice: number;
+  lineTotal: number;
+}
+
+interface Order {
+  id: string;
+  orderNumber: string;
+  customerName: string;
+  status: OrderStatus;
+  paymentMethod: string;
+  totalAmount: number;
+  notes?: string;
+  transactionId: string;
+  createdAt: string;
+  updatedAt: string;
+  userId?: string;
+  items: OrderItem[];
+}
+
+interface OrderInput {
+  customerName: string;
+  status: OrderStatus;
+  paymentMethod: string;
+  notes?: string;
+  items: Array<{
+    articleId: string;
+    quantity: number;
+  }>;
+}
+
 interface LocalApiState {
   document: StorageDocument;
   backups: LocalBackup[];
@@ -117,6 +155,7 @@ interface LocalApiState {
   catalogCategories: CatalogCategory[];
   catalogArticles: Omit<CatalogArticle, "categoryName">[];
   inventoryMovements: InventoryMovement[];
+  orders: Order[];
 }
 
 interface AuthSession {
@@ -671,6 +710,77 @@ async function handleLocalApiRequest(input: {
     return;
   }
 
+  if (pathname === "/api/orders" && method === "GET") {
+    sendJson(response, 200, {
+      orders: getOrdersForSession(state, session)
+    });
+    return;
+  }
+
+  if (pathname === "/api/orders" && method === "POST") {
+    if (session.role !== "user") {
+      sendJson(response, 403, { error: "Forbidden." });
+      return;
+    }
+
+    const input = readOrderInput(await readJsonBody(request));
+
+    if (input === null) {
+      sendJson(response, 400, { error: "Invalid order." });
+      return;
+    }
+
+    const orderResult = createLocalOrder(state, input, session);
+
+    if (!orderResult.ok) {
+      sendJson(response, 400, { error: orderResult.error });
+      return;
+    }
+
+    state.orders.push(orderResult.order);
+    state.document.transactions.push(orderResult.transaction);
+    state.inventoryMovements.push(...orderResult.movements);
+    state.document.lastUpdatedAt = new Date().toISOString();
+    await writeState(dataFilePath, state);
+    sendJson(response, 201, { order: orderResult.order });
+    return;
+  }
+
+  const orderStatusRoute = pathname.match(/^\/api\/orders\/([^/]+)\/status$/);
+
+  if (orderStatusRoute && method === "PUT") {
+    if (session.role !== "user") {
+      sendJson(response, 403, { error: "Forbidden." });
+      return;
+    }
+
+    const id = decodeURIComponent(orderStatusRoute[1]);
+    const status = readOrderStatusInput(await readJsonBody(request));
+
+    if (status === null) {
+      sendJson(response, 400, { error: "Invalid order status." });
+      return;
+    }
+
+    const orderIndex = state.orders.findIndex(
+      (order) => order.id === id && order.userId === session.userId
+    );
+
+    if (orderIndex === -1) {
+      sendJson(response, 404, { error: "Not found." });
+      return;
+    }
+
+    state.orders[orderIndex] = {
+      ...state.orders[orderIndex],
+      status,
+      updatedAt: new Date().toISOString()
+    };
+    await writeState(dataFilePath, state);
+    sendJson(response, 200, { order: state.orders[orderIndex] });
+    return;
+  }
+
   const transactionRoute = pathname.match(/^\/api\/transactions\/([^/]+)$/);
 
   if (transactionRoute && method === "PUT") {
@@ -758,6 +868,7 @@ async function readState(filePath: string): Promise<LocalApiState> {
         catalogCategories: parsed.catalogCategories ?? [],
         catalogArticles: parsed.catalogArticles ?? [],
         inventoryMovements: parsed.inventoryMovements ?? [],
+        orders: parsed.orders ?? [],
         document: {
           ...parsed.document,
           transactions: parsed.document.transactions
@@ -787,7 +898,8 @@ function createEmptyState(): LocalApiState {
     users: [],
     catalogCategories: [],
     catalogArticles: [],
-    inventoryMovements: []
+    inventoryMovements: [],
+    orders: []
   };
 }
 
@@ -1013,6 +1125,7 @@ function getInventoryForSession(state: LocalApiState, session: AuthSession) {
       categoryName: article.categoryName,
       ...(article.sku ? { sku: article.sku } : {}),
       ...(article.unit ? { unit: article.unit } : {}),
+      ...(typeof article.price === "number" ? { price: article.price } : {}),
       active: article.active,
       quantity: quantities[article.id] ?? 0
     })),
@@ -1046,6 +1159,112 @@ function hydrateInventoryMovement(
     createdAt: movement.createdAt,
     ...(movement.userId ? { userId: movement.userId } : {})
   };
+}
+
+function getOrdersForSession(state: LocalApiState, session: AuthSession) {
+  return state.orders
+    .filter((order) => session.role === "admin" || order.userId === session.userId)
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+}
+
+function createLocalOrder(
+  state: LocalApiState,
+  input: OrderInput,
+  session: AuthSession
+):
+  | {
+      ok: true;
+      order: Order;
+      transaction: FinancialTransaction;
+      movements: InventoryMovement[];
+    }
+  | { ok: false; error: string } {
+  const catalog = getCatalogForSession(state, session);
+  const inventory = getInventoryForSession(state, session);
+  const articlesById = new Map(catalog.articles.map((article) => [article.id, article]));
+  const stockByArticleId = new Map(
+    inventory.items.map((item) => [item.articleId, item.quantity])
+  );
+  const requestedItems = mergeOrderItems(input.items);
+  const now = new Date().toISOString();
+  const orderId = crypto.randomUUID();
+  const transactionId = crypto.randomUUID();
+  const orderNumber = createOrderNumber(now);
+  const orderItems: OrderItem[] = [];
+
+  for (const item of requestedItems) {
+    const article = articlesById.get(item.articleId);
+
+    if (!article || !article.active) {
+      return { ok: false, error: "Invalid article." };
+    }
+
+    if (typeof article.price !== "number" || article.price <= 0) {
+      return { ok: false, error: "Missing price." };
+    }
+
+    if ((stockByArticleId.get(item.articleId) ?? 0) < item.quantity) {
+      return { ok: false, error: "Insufficient stock." };
+    }
+
+    orderItems.push({
+      id: crypto.randomUUID(),
+      orderId,
+      articleId: item.articleId,
+      articleName: article.name,
+      quantity: item.quantity,
+      unitPrice: article.price,
+      lineTotal: roundMoney(article.price * item.quantity)
+    });
+  }
+
+  const totalAmount = roundMoney(
+    orderItems.reduce((total, item) => total + item.lineTotal, 0)
+  );
+
+  if (totalAmount <= 0) {
+    return { ok: false, error: "Invalid order." };
+  }
+
+  const order: Order = {
+    id: orderId,
+    orderNumber,
+    customerName: input.customerName,
+    status: input.status,
+    paymentMethod: input.paymentMethod,
+    totalAmount,
+    ...(input.notes ? { notes: input.notes } : {}),
+    transactionId,
+    createdAt: now,
+    updatedAt: now,
+    userId: session.userId,
+    items: orderItems
+  };
+  const transaction: FinancialTransaction = {
+    id: transactionId,
+    userId: session.userId,
+    type: "income",
+    date: now.slice(0, 10),
+    amount: totalAmount,
+    category: "sale",
+    description: `Pedido ${orderNumber} - ${input.customerName}`,
+    paymentMethod: input.paymentMethod,
+    ...(input.notes ? { notes: input.notes } : {}),
+    createdAt: now,
+    updatedAt: now
+  };
+  const movements = orderItems.map<InventoryMovement>((item) => ({
+    id: crypto.randomUUID(),
+    articleId: item.articleId,
+    type: "out",
+    quantity: item.quantity,
+    reason: `Pedido ${orderNumber}`,
+    notes: input.customerName,
+    createdAt: now,
+    userId: session.userId
+  }));
+
+  return { ok: true, order, transaction, movements };
 }
 
 function stripUserSecrets(user: LocalUser) {
@@ -1153,6 +1372,110 @@ function readInventoryMovementInput(
   };
 }
 
+function readOrderInput(value: unknown): OrderInput | null {
+  if (
+    !isRecord(value) ||
+    typeof value.customerName !== "string" ||
+    typeof value.paymentMethod !== "string" ||
+    !isOrderStatus(value.status) ||
+    !Array.isArray(value.items)
+  ) {
+    return null;
+  }
+
+  const customerName = value.customerName.trim();
+  const paymentMethod = value.paymentMethod.trim();
+  const items = value.items.map(readOrderItemInput);
+
+  if (
+    customerName.length === 0 ||
+    paymentMethod.length === 0 ||
+    !isPaymentMethod(paymentMethod) ||
+    items.length === 0 ||
+    items.some((item) => item === null)
+  ) {
+    return null;
+  }
+
+  return {
+    customerName,
+    status: value.status,
+    paymentMethod,
+    items: items as OrderInput["items"],
+    ...(typeof value.notes === "string" && value.notes.trim()
+      ? { notes: value.notes.trim() }
+      : {})
+  };
+}
+
+function readOrderStatusInput(value: unknown): OrderStatus | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  return isOrderStatus(value.status) ? value.status : null;
+}
+
+function readOrderItemInput(value: unknown) {
+  if (
+    !isRecord(value) ||
+    typeof value.articleId !== "string" ||
+    typeof value.quantity !== "number"
+  ) {
+    return null;
+  }
+
+  const articleId = value.articleId.trim();
+
+  if (
+    articleId.length === 0 ||
+    !Number.isFinite(value.quantity) ||
+    value.quantity <= 0
+  ) {
+    return null;
+  }
+
+  return {
+    articleId,
+    quantity: value.quantity
+  };
+}
+
+function mergeOrderItems(items: OrderInput["items"]) {
+  const quantitiesByArticle = items.reduce<Record<string, number>>(
+    (quantities, item) => {
+      quantities[item.articleId] = (quantities[item.articleId] ?? 0) + item.quantity;
+      return quantities;
+    },
+    {}
+  );
+
+  return Object.entries(quantitiesByArticle).map(([articleId, quantity]) => ({
+    articleId,
+    quantity
+  }));
+}
+
+function isOrderStatus(value: unknown): value is OrderStatus {
+  return (
+    value === "pending" ||
+    value === "confirmed" ||
+    value === "delivered" ||
+    value === "cancelled"
+  );
+}
+
+function isPaymentMethod(value: string) {
+  return (
+    value === "cash" ||
+    value === "debit_card" ||
+    value === "credit_card" ||
+    value === "bank_transfer" ||
+    value === "digital_wallet" ||
+    value === "other"
+  );
+}
+
 function isInventoryMovementType(value: unknown): value is InventoryMovementType {
   return value === "in" || value === "out" || value === "adjustment";
 }
@@ -1230,8 +1553,20 @@ function isState(value: unknown): value is LocalApiState {
       Array.isArray(value.catalogCategories)) &&
     (!("catalogArticles" in value) || Array.isArray(value.catalogArticles)) &&
     (!("inventoryMovements" in value) ||
-      Array.isArray(value.inventoryMovements))
+      Array.isArray(value.inventoryMovements)) &&
+    (!("orders" in value) || Array.isArray(value.orders))
   );
+}
+
+function createOrderNumber(value: string) {
+  const datePart = value.slice(0, 10).replaceAll("-", "");
+  const randomPart = crypto.randomUUID().slice(0, 8).toUpperCase();
+
+  return `PED-${datePart}-${randomPart}`;
+}
+
+function roundMoney(value: number) {
+  return Math.round(value * 100) / 100;
 }
 
 function sortTransactions(
