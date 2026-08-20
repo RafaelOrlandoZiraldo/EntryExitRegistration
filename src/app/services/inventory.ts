@@ -6,6 +6,7 @@ export interface InventoryItem {
   categoryName: string;
   sku?: string;
   unit?: string;
+  price?: number;
   active: boolean;
   quantity: number;
 }
