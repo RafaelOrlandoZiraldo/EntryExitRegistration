@@ -4,6 +4,7 @@ import { authServices } from "@app/services/auth";
 import { catalogServices } from "@app/services/catalog";
 import { inventoryServices } from "@app/services/inventory";
 import { orderServices } from "@app/services/orders";
+import { purchaseOrderServices } from "@app/services/purchaseOrders";
 import { transactionServices } from "@app/services/transactions";
 import { userServices } from "@app/services/users";
 import { AppShell } from "@app/shell/AppShell";
@@ -18,6 +19,7 @@ import { CatalogPage } from "@features/catalog";
 import { HomePage } from "@features/home/HomePage";
 import { InventoryPage } from "@features/inventory";
 import { OrdersPage } from "@features/orders";
+import { PurchaseOrdersPage } from "@features/purchase-orders";
 import { TransactionsPage } from "@features/transactions";
 import { UsersPage } from "@features/users";
 
@@ -103,6 +105,17 @@ export const router = createBrowserRouter([
                   <OrdersPage
                     inventoryService={inventoryServices.inventory}
                     ordersService={orderServices.orders}
+                  />
+                )
+              },
+              {
+                path: "purchase-orders",
+                element: (
+                  <PurchaseOrdersPage
+                    inventoryService={inventoryServices.inventory}
+                    purchaseOrdersService={
+                      purchaseOrderServices.purchaseOrders
+                    }
                   />
                 )
               }
