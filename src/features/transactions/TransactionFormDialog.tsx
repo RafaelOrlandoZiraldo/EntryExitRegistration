@@ -1,5 +1,5 @@
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Save } from "lucide-react";
+import { Plus, Save } from "lucide-react";
 import type { ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { useForm } from "react-hook-form";
@@ -87,7 +87,10 @@ export function TransactionFormDialog({
     }
   }, [categoryOptions, selectedCategory, setValue]);
 
-  const onSubmit = async (values: TransactionFormValues) => {
+  const onSubmit = async (
+    values: TransactionFormValues,
+    options: { closeAfterSave: boolean }
+  ) => {
     setSubmitError(null);
 
     try {
@@ -107,7 +110,11 @@ export function TransactionFormDialog({
       }
 
       await onSuccess();
-      onOpenChange(false);
+      if (options.closeAfterSave) {
+        onOpenChange(false);
+      } else {
+        reset(getDefaultValues());
+      }
     } catch (error) {
       const userFacingError = mapError(error);
       setSubmitError(userFacingError.message);
@@ -130,7 +137,9 @@ export function TransactionFormDialog({
           className="grid gap-4"
           noValidate
           onSubmit={(event) => {
-            void handleSubmit(onSubmit)(event);
+            void handleSubmit((values) =>
+              onSubmit(values, { closeAfterSave: true })
+            )(event);
           }}
         >
           <div className="grid gap-2">
@@ -248,6 +257,21 @@ export function TransactionFormDialog({
               <Save aria-hidden="true" className="mr-2 h-4 w-4" />
               {isSubmitting ? "Guardando" : "Guardar"}
             </Button>
+            {mode === "create" ? (
+              <Button
+                disabled={isSubmitting}
+                type="button"
+                variant="secondary"
+                onClick={() => {
+                  void handleSubmit((values) =>
+                    onSubmit(values, { closeAfterSave: false })
+                  )();
+                }}
+              >
+                <Plus aria-hidden="true" className="mr-2 h-4 w-4" />
+                Agregar mas
+              </Button>
+            ) : null}
           </div>
         </form>
       </DialogContent>

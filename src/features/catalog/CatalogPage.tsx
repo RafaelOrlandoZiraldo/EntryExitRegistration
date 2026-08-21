@@ -91,6 +91,7 @@ export function CatalogPage({ catalogService }: CatalogPageProps) {
     useState<ArticleDraft>(emptyArticleDraft);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [categoryDialogOpen, setCategoryDialogOpen] = useState(false);
+  const [articleDialogOpen, setArticleDialogOpen] = useState(false);
   const { notify } = useToast();
 
   const loadCatalog = useCallback(() => {
@@ -131,9 +132,7 @@ export function CatalogPage({ catalogService }: CatalogPageProps) {
     }, {});
   }, [articles]);
 
-  const saveCategory = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-
+  const saveCategory = async (options: { closeAfterSave: boolean }) => {
     const input = parseCategoryDraft(categoryDraft);
 
     if (!input) {
@@ -151,7 +150,9 @@ export function CatalogPage({ catalogService }: CatalogPageProps) {
       notify({ type: "success", message: "Categoria creada correctamente." });
 
       setCategoryDraft(emptyCategoryDraft);
-      setCategoryDialogOpen(false);
+      if (options.closeAfterSave) {
+        setCategoryDialogOpen(false);
+      }
       loadCatalog();
     } catch (error) {
       notify({ type: "error", message: getCatalogErrorMessage(error) });
@@ -194,9 +195,7 @@ export function CatalogPage({ catalogService }: CatalogPageProps) {
       });
   }, [catalogService, editingCategoryDraft, loadCatalog, notify]);
 
-  const saveArticle = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-
+  const saveArticle = async (options: { closeAfterSave: boolean }) => {
     const input = parseArticleDraft(articleDraft);
 
     if (!input) {
@@ -222,6 +221,9 @@ export function CatalogPage({ catalogService }: CatalogPageProps) {
         ...emptyArticleDraft,
         categoryId: categories[0]?.id || ""
       });
+      if (options.closeAfterSave) {
+        setArticleDialogOpen(false);
+      }
       loadCatalog();
     } catch (error) {
       notify({ type: "error", message: getCatalogErrorMessage(error) });
@@ -314,30 +316,75 @@ export function CatalogPage({ catalogService }: CatalogPageProps) {
               }}
               onSaveEdit={saveCategoryEdit}
               onSubmit={(event) => {
-                void saveCategory(event);
+                event.preventDefault();
+                void saveCategory({ closeAfterSave: true });
+              }}
+              onSubmitMore={() => {
+                void saveCategory({ closeAfterSave: false });
               }}
             />
           ) : null}
 
           {canManageCatalog ? (
-            <ArticleForm
-              categories={categories}
-              draft={articleDraft}
-              disabled={isSubmitting || categories.length === 0}
-              onCancel={() => {
-                setArticleDraft({
-                  ...emptyArticleDraft,
-                  categoryId: categories[0]?.id || ""
-                });
-              }}
-              onChange={setArticleDraft}
-              onSubmit={(event) => {
-                void saveArticle(event);
-              }}
-            />
-          ) : null}
+            <>
+              <div className="flex justify-end">
+                <Button
+                  type="button"
+                  onClick={() => {
+                    setArticleDraft({
+                      ...emptyArticleDraft,
+                      categoryId: categories[0]?.id || ""
+                    });
+                    setArticleDialogOpen(true);
+                  }}
+                >
+                  <PackagePlus aria-hidden="true" className="mr-2 h-4 w-4" />
+                  Nuevo articulo
+                </Button>
+              </div>
 
-          <CatalogSummary categories={categories} articles={articles} />
+              <Dialog
+                open={articleDialogOpen}
+                onOpenChange={(open) => {
+                  setArticleDialogOpen(open);
+                  if (!open) {
+                    setArticleDraft({
+                      ...emptyArticleDraft,
+                      categoryId: categories[0]?.id || ""
+                    });
+                  }
+                }}
+              >
+                <DialogContent className="max-w-4xl">
+                  <DialogHeader>
+                    <DialogTitle>
+                      {articleDraft.id ? "Editar articulo" : "Nuevo articulo"}
+                    </DialogTitle>
+                    <DialogDescription>
+                      Carga y actualiza los articulos del catalogo.
+                    </DialogDescription>
+                  </DialogHeader>
+
+                  <ArticleForm
+                    categories={categories}
+                    draft={articleDraft}
+                    disabled={isSubmitting || categories.length === 0}
+                    onCancel={() => {
+                      setArticleDraft({
+                        ...emptyArticleDraft,
+                        categoryId: categories[0]?.id || ""
+                      });
+                      setArticleDialogOpen(false);
+                    }}
+                    onChange={setArticleDraft}
+                    onSubmit={(options) => {
+                      void saveArticle(options);
+                    }}
+                  />
+                </DialogContent>
+              </Dialog>
+            </>
+          ) : null}
 
           <ArticlesList
             articles={articles}
@@ -355,6 +402,7 @@ export function CatalogPage({ catalogService }: CatalogPageProps) {
                   typeof article.price === "number" ? String(article.price) : "",
                 active: article.active
               });
+              setArticleDialogOpen(true);
             }}
           />
         </>
@@ -378,6 +426,7 @@ function CategoryCreateDialog({
   onEdit,
   onOpenChange,
   onSaveEdit,
+  onSubmitMore,
   onSubmit
 }: {
   articleCountByCategory: Record<string, number>;
@@ -394,6 +443,7 @@ function CategoryCreateDialog({
   onEdit(this: void, category: CatalogCategory): void;
   onOpenChange(this: void, open: boolean): void;
   onSaveEdit(this: void): void;
+  onSubmitMore(this: void): void;
   onSubmit(this: void, event: FormEvent<HTMLFormElement>): void;
 }) {
   return (
@@ -445,6 +495,15 @@ function CategoryCreateDialog({
             </label>
 
             <div className="flex flex-wrap gap-2">
+              <Button
+                disabled={disabled}
+                type="button"
+                variant="secondary"
+                onClick={onSubmitMore}
+              >
+                <Plus aria-hidden="true" className="mr-2 h-4 w-4" />
+                Agregar mas
+              </Button>
               <Button disabled={disabled} type="submit">
                 <Plus aria-hidden="true" className="mr-2 h-4 w-4" />
                 Crear
@@ -483,20 +542,16 @@ function ArticleForm({
   disabled: boolean;
   onCancel(this: void): void;
   onChange(this: void, draft: ArticleDraft): void;
-  onSubmit(this: void, event: FormEvent<HTMLFormElement>): void;
+  onSubmit(this: void, options: { closeAfterSave: boolean }): void;
 }) {
   return (
     <form
-      className="grid gap-4 rounded-lg border border-border bg-card p-4 shadow-sm"
-      onSubmit={onSubmit}
+      className="grid gap-4"
+      onSubmit={(event) => {
+        event.preventDefault();
+        onSubmit({ closeAfterSave: true });
+      }}
     >
-      <div>
-        <h2 className="flex items-center gap-2 text-base font-semibold">
-          <PackagePlus aria-hidden="true" className="h-4 w-4 text-primary" />
-          {draft.id ? "Editar articulo" : "Nuevo articulo"}
-        </h2>
-      </div>
-
       {categories.length === 0 ? (
         <p className="rounded-md border border-border bg-muted/60 p-3 text-sm text-muted-foreground">
           Primero crea una categoria para poder cargar articulos.
@@ -593,6 +648,7 @@ function ArticleForm({
         disabled={disabled}
         isEditing={Boolean(draft.id)}
         submitLabel={draft.id ? "Guardar" : "Crear"}
+        onSubmitMore={() => onSubmit({ closeAfterSave: false })}
         onCancel={onCancel}
       />
     </form>
@@ -602,16 +658,29 @@ function ArticleForm({
 function FormActions({
   disabled,
   isEditing,
+  onSubmitMore,
   submitLabel,
   onCancel
 }: {
   disabled: boolean;
   isEditing: boolean;
+  onSubmitMore(this: void): void;
   submitLabel: string;
   onCancel(this: void): void;
 }) {
   return (
     <div className="flex flex-wrap gap-2">
+      {!isEditing ? (
+        <Button
+          disabled={disabled}
+          type="button"
+          variant="secondary"
+          onClick={onSubmitMore}
+        >
+          <Plus aria-hidden="true" className="mr-2 h-4 w-4" />
+          Agregar mas
+        </Button>
+      ) : null}
       <Button disabled={disabled} type="submit">
         {isEditing ? (
           <Save aria-hidden="true" className="mr-2 h-4 w-4" />
@@ -626,33 +695,6 @@ function FormActions({
           Cancelar
         </Button>
       ) : null}
-    </div>
-  );
-}
-
-function CatalogSummary({
-  categories,
-  articles
-}: {
-  categories: CatalogCategory[];
-  articles: CatalogArticle[];
-}) {
-  const activeArticles = articles.filter((article) => article.active).length;
-
-  return (
-    <div className="grid gap-3 sm:grid-cols-3">
-      <SummaryTile label="Categorias" value={categories.length} />
-      <SummaryTile label="Articulos" value={articles.length} />
-      <SummaryTile label="Activos" value={activeArticles} />
-    </div>
-  );
-}
-
-function SummaryTile({ label, value }: { label: string; value: number }) {
-  return (
-    <div className="rounded-lg border border-border bg-card p-4 shadow-sm">
-      <p className="text-sm text-muted-foreground">{label}</p>
-      <p className="mt-1 text-2xl font-semibold">{value}</p>
     </div>
   );
 }
