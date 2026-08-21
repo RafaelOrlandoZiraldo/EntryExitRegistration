@@ -2,9 +2,10 @@ import {
   ClipboardCheck,
   Minus,
   PackagePlus,
+  Plus,
   ShoppingCart
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { InventoryItem, InventorySnapshot } from "@app/services/inventory";
 import type {
   Order,
@@ -14,6 +15,11 @@ import type {
 } from "@app/services/orders";
 import {
   Button,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
   EmptyState,
   ErrorState,
   LoadingState,
@@ -62,6 +68,7 @@ export function OrdersPage({ inventoryService, ordersService }: OrdersPageProps)
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [draft, setDraft] = useState<OrderDraft>(emptyDraft);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [formOpen, setFormOpen] = useState(false);
   const { notify } = useToast();
 
   const loadOrders = useCallback(() => {
@@ -131,9 +138,7 @@ export function OrdersPage({ inventoryService, ordersService }: OrdersPageProps)
     [articleById, draft.items]
   );
 
-  const submitOrder = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-
+  const submitOrder = async (options: { closeAfterSave: boolean }) => {
     const input = parseOrderDraft(draft);
 
     if (!input) {
@@ -153,6 +158,9 @@ export function OrdersPage({ inventoryService, ordersService }: OrdersPageProps)
         ...emptyDraft,
         items: [{ articleId: sellableItems[0]?.articleId || "", quantity: "1" }]
       });
+      if (options.closeAfterSave) {
+        setFormOpen(false);
+      }
       loadOrders();
     } catch (error) {
       notify({ type: "error", message: getOrderErrorMessage(error) });
@@ -202,18 +210,34 @@ export function OrdersPage({ inventoryService, ordersService }: OrdersPageProps)
 
       {state.status === "success" ? (
         <>
-          <OrdersSummary orders={orders} />
+          <div className="flex justify-end">
+            <Button type="button" onClick={() => setFormOpen(true)}>
+              <ShoppingCart aria-hidden="true" className="mr-2 h-4 w-4" />
+              Nuevo pedido
+            </Button>
+          </div>
 
-          <OrderForm
-            draft={draft}
-            disabled={isSubmitting || sellableItems.length === 0}
-            items={sellableItems}
-            total={draftTotal}
-            onChange={setDraft}
-            onSubmit={(event) => {
-              void submitOrder(event);
-            }}
-          />
+          <Dialog open={formOpen} onOpenChange={setFormOpen}>
+            <DialogContent className="max-w-4xl">
+              <DialogHeader>
+                <DialogTitle>Nuevo pedido</DialogTitle>
+                <DialogDescription>
+                  Registra la venta y descuenta stock automaticamente.
+                </DialogDescription>
+              </DialogHeader>
+
+              <OrderForm
+                draft={draft}
+                disabled={isSubmitting || sellableItems.length === 0}
+                items={sellableItems}
+                total={draftTotal}
+                onChange={setDraft}
+                onSubmit={(options) => {
+                  void submitOrder(options);
+                }}
+              />
+            </DialogContent>
+          </Dialog>
 
           <OrdersList orders={orders} onStatusChange={updateStatus} />
         </>
@@ -235,12 +259,15 @@ function OrderForm({
   items: InventoryItem[];
   total: number;
   onChange(this: void, draft: OrderDraft): void;
-  onSubmit(this: void, event: FormEvent<HTMLFormElement>): void;
+  onSubmit(this: void, options: { closeAfterSave: boolean }): void;
 }) {
   return (
     <form
-      className="grid gap-4 rounded-lg border border-border bg-card p-4 shadow-sm"
-      onSubmit={onSubmit}
+      className="grid gap-4"
+      onSubmit={(event) => {
+        event.preventDefault();
+        onSubmit({ closeAfterSave: true });
+      }}
     >
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
@@ -369,10 +396,21 @@ function OrderForm({
         <p className="text-sm text-muted-foreground">
           Al generar el pedido se registra la venta y se descuenta el stock.
         </p>
-        <Button disabled={disabled} type="submit">
-          <ClipboardCheck aria-hidden="true" className="mr-2 h-4 w-4" />
-          Generar pedido
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            disabled={disabled}
+            type="button"
+            variant="secondary"
+            onClick={() => onSubmit({ closeAfterSave: false })}
+          >
+            <Plus aria-hidden="true" className="mr-2 h-4 w-4" />
+            Agregar mas
+          </Button>
+          <Button disabled={disabled} type="submit">
+            <ClipboardCheck aria-hidden="true" className="mr-2 h-4 w-4" />
+            Generar pedido
+          </Button>
+        </div>
       </div>
     </form>
   );
@@ -456,28 +494,6 @@ function OrderLineEditor({
       >
         <Minus aria-hidden="true" className="h-4 w-4" />
       </Button>
-    </div>
-  );
-}
-
-function OrdersSummary({ orders }: { orders: Order[] }) {
-  const delivered = orders.filter((order) => order.status === "delivered").length;
-  const totalAmount = orders.reduce((total, order) => total + order.totalAmount, 0);
-
-  return (
-    <div className="grid gap-3 sm:grid-cols-3">
-      <SummaryTile label="Pedidos" value={orders.length} />
-      <SummaryTile label="Entregados" value={delivered} />
-      <SummaryTile label="Ventas" value={formatMoney(totalAmount)} />
-    </div>
-  );
-}
-
-function SummaryTile({ label, value }: { label: string; value: number | string }) {
-  return (
-    <div className="rounded-lg border border-border bg-card p-4 shadow-sm">
-      <p className="text-sm text-muted-foreground">{label}</p>
-      <p className="mt-1 text-2xl font-semibold">{value}</p>
     </div>
   );
 }

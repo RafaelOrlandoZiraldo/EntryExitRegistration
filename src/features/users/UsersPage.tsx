@@ -1,9 +1,14 @@
-import { UserPlus } from "lucide-react";
-import { useCallback, useEffect, useState, type FormEvent } from "react";
+import { Plus, UserPlus } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
 import type { AppUser, CreateUserInput } from "@app/services/users";
 import { useAuth } from "@features/auth";
 import {
   Button,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
   EmptyState,
   ErrorState,
   LoadingState,
@@ -32,6 +37,7 @@ export function UsersPage({ usersService }: UsersPageProps) {
     role: "user"
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [formOpen, setFormOpen] = useState(false);
   const { notify } = useToast();
 
   const loadUsers = useCallback(() => {
@@ -64,9 +70,7 @@ export function UsersPage({ usersService }: UsersPageProps) {
     );
   }
 
-  const submitUser = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-
+  const submitUser = async (options: { closeAfterSave: boolean }) => {
     if (form.username.trim().length === 0 || form.password.length < 8) {
       notify({
         type: "warning",
@@ -86,6 +90,9 @@ export function UsersPage({ usersService }: UsersPageProps) {
       });
       setForm({ username: "", password: "", role: "user" });
       notify({ type: "success", message: "Usuario creado correctamente." });
+      if (options.closeAfterSave) {
+        setFormOpen(false);
+      }
       loadUsers();
     } catch {
       notify({
@@ -105,59 +112,98 @@ export function UsersPage({ usersService }: UsersPageProps) {
         description="Crea accesos para que cada usuario gestione sus propios movimientos."
       />
 
-      <form
-        className="grid gap-4 rounded-lg border border-border bg-card p-4 shadow-sm md:grid-cols-[1fr_1fr_12rem_auto] md:items-end"
-        onSubmit={(event) => void submitUser(event)}
-      >
-        <label className="grid gap-2 text-sm font-medium">
-          Usuario
-          <input
-            className="h-10 rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            value={form.username}
-            onChange={(event) => {
-              setForm((current) => ({
-                ...current,
-                username: event.target.value
-              }));
-            }}
-          />
-        </label>
-        <label className="grid gap-2 text-sm font-medium">
-          Contrasena
-          <input
-            className="h-10 rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            minLength={8}
-            type="password"
-            value={form.password}
-            onChange={(event) => {
-              setForm((current) => ({
-                ...current,
-                password: event.target.value
-              }));
-            }}
-          />
-        </label>
-        <label className="grid gap-2 text-sm font-medium">
-          Rol
-          <select
-            className="h-10 rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            value={form.role}
-            onChange={(event) => {
-              setForm((current) => ({
-                ...current,
-                role: event.target.value === "admin" ? "admin" : "user"
-              }));
+      <div className="flex justify-end">
+        <Button type="button" onClick={() => setFormOpen(true)}>
+          <UserPlus aria-hidden="true" className="mr-2 h-4 w-4" />
+          Nuevo usuario
+        </Button>
+      </div>
+
+      <Dialog open={formOpen} onOpenChange={setFormOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Nuevo usuario</DialogTitle>
+            <DialogDescription>
+              Crea accesos para usuarios y administradores.
+            </DialogDescription>
+          </DialogHeader>
+
+          <form
+            className="grid gap-4"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void submitUser({ closeAfterSave: true });
             }}
           >
-            <option value="user">Usuario raso</option>
-            <option value="admin">Admin</option>
-          </select>
-        </label>
-        <Button disabled={isSubmitting} type="submit">
-          <UserPlus aria-hidden="true" className="mr-2 h-4 w-4" />
-          Crear
-        </Button>
-      </form>
+            <label className="grid gap-2 text-sm font-medium">
+              Usuario
+              <input
+                className="h-10 rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                value={form.username}
+                onChange={(event) => {
+                  setForm((current) => ({
+                    ...current,
+                    username: event.target.value
+                  }));
+                }}
+              />
+            </label>
+            <label className="grid gap-2 text-sm font-medium">
+              Contrasena
+              <input
+                className="h-10 rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                minLength={8}
+                type="password"
+                value={form.password}
+                onChange={(event) => {
+                  setForm((current) => ({
+                    ...current,
+                    password: event.target.value
+                  }));
+                }}
+              />
+            </label>
+            <label className="grid gap-2 text-sm font-medium">
+              Rol
+              <select
+                className="h-10 rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                value={form.role}
+                onChange={(event) => {
+                  setForm((current) => ({
+                    ...current,
+                    role: event.target.value === "admin" ? "admin" : "user"
+                  }));
+                }}
+              >
+                <option value="user">Usuario raso</option>
+                <option value="admin">Admin</option>
+              </select>
+            </label>
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setFormOpen(false)}
+              >
+                Cancelar
+              </Button>
+              <Button
+                disabled={isSubmitting}
+                type="button"
+                variant="secondary"
+                onClick={() => void submitUser({ closeAfterSave: false })}
+              >
+                <Plus aria-hidden="true" className="mr-2 h-4 w-4" />
+                Agregar mas
+              </Button>
+              <Button disabled={isSubmitting} type="submit">
+                <UserPlus aria-hidden="true" className="mr-2 h-4 w-4" />
+                Crear
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
 
       {state.status === "loading" ? (
         <LoadingState title="Cargando usuarios" />

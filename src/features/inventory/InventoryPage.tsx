@@ -1,5 +1,11 @@
-import { ArrowDownToLine, ArrowUpFromLine, PackageCheck, SlidersHorizontal } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import {
+  ArrowDownToLine,
+  ArrowUpFromLine,
+  PackageCheck,
+  Plus,
+  SlidersHorizontal
+} from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type {
   InventoryItem,
   InventoryMovement,
@@ -9,6 +15,11 @@ import type {
 } from "@app/services/inventory";
 import {
   Button,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
   EmptyState,
   ErrorState,
   LoadingState,
@@ -51,6 +62,7 @@ export function InventoryPage({ inventoryService }: InventoryPageProps) {
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [draft, setDraft] = useState<MovementDraft>(emptyDraft);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [formOpen, setFormOpen] = useState(false);
   const { notify } = useToast();
 
   const loadInventory = useCallback(() => {
@@ -88,13 +100,7 @@ export function InventoryPage({ inventoryService }: InventoryPageProps) {
     () => items.filter((item) => item.active),
     [items]
   );
-  const totalUnits = useMemo(
-    () => items.reduce((total, item) => total + item.quantity, 0),
-    [items]
-  );
-
-  const submitMovement = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  const submitMovement = async (options: { closeAfterSave: boolean }) => {
     const input = parseMovementDraft(draft);
 
     if (!input) {
@@ -114,6 +120,9 @@ export function InventoryPage({ inventoryService }: InventoryPageProps) {
         ...emptyDraft,
         articleId: activeItems[0]?.articleId || items[0]?.articleId || ""
       });
+      if (options.closeAfterSave) {
+        setFormOpen(false);
+      }
       loadInventory();
     } catch {
       notify({
@@ -148,21 +157,33 @@ export function InventoryPage({ inventoryService }: InventoryPageProps) {
 
       {state.status === "success" ? (
         <>
-          <InventorySummary
-            itemCount={items.length}
-            movementCount={movements.length}
-            totalUnits={totalUnits}
-          />
+          <div className="flex justify-end">
+            <Button type="button" onClick={() => setFormOpen(true)}>
+              <PackageCheck aria-hidden="true" className="mr-2 h-4 w-4" />
+              Nuevo movimiento
+            </Button>
+          </div>
 
-          <MovementForm
-            draft={draft}
-            disabled={isSubmitting || items.length === 0}
-            items={activeItems.length > 0 ? activeItems : items}
-            onChange={setDraft}
-            onSubmit={(event) => {
-              void submitMovement(event);
-            }}
-          />
+          <Dialog open={formOpen} onOpenChange={setFormOpen}>
+            <DialogContent className="max-w-5xl">
+              <DialogHeader>
+                <DialogTitle>Nuevo movimiento</DialogTitle>
+                <DialogDescription>
+                  Registra entradas, salidas y ajustes de stock.
+                </DialogDescription>
+              </DialogHeader>
+
+              <MovementForm
+                draft={draft}
+                disabled={isSubmitting || items.length === 0}
+                items={activeItems.length > 0 ? activeItems : items}
+                onChange={setDraft}
+                onSubmit={(options) => {
+                  void submitMovement(options);
+                }}
+              />
+            </DialogContent>
+          </Dialog>
 
           <InventoryStockList items={items} />
           <InventoryMovementList movements={movements} />
@@ -183,12 +204,15 @@ function MovementForm({
   disabled: boolean;
   items: InventoryItem[];
   onChange(this: void, draft: MovementDraft): void;
-  onSubmit(this: void, event: FormEvent<HTMLFormElement>): void;
+  onSubmit(this: void, options: { closeAfterSave: boolean }): void;
 }) {
   return (
     <form
-      className="grid gap-4 rounded-lg border border-border bg-card p-4 shadow-sm"
-      onSubmit={onSubmit}
+      className="grid gap-4"
+      onSubmit={(event) => {
+        event.preventDefault();
+        onSubmit({ closeAfterSave: true });
+      }}
     >
       <div>
         <h2 className="flex items-center gap-2 text-base font-semibold">
@@ -264,9 +288,20 @@ function MovementForm({
           />
         </label>
 
-        <Button disabled={disabled} type="submit">
-          Registrar
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            disabled={disabled}
+            type="button"
+            variant="secondary"
+            onClick={() => onSubmit({ closeAfterSave: false })}
+          >
+            <Plus aria-hidden="true" className="mr-2 h-4 w-4" />
+            Agregar mas
+          </Button>
+          <Button disabled={disabled} type="submit">
+            Registrar
+          </Button>
+        </div>
       </div>
 
       <label className="grid gap-2 text-sm font-medium">
@@ -280,33 +315,6 @@ function MovementForm({
         />
       </label>
     </form>
-  );
-}
-
-function InventorySummary({
-  itemCount,
-  movementCount,
-  totalUnits
-}: {
-  itemCount: number;
-  movementCount: number;
-  totalUnits: number;
-}) {
-  return (
-    <div className="grid gap-3 sm:grid-cols-3">
-      <SummaryTile label="Productos" value={itemCount} />
-      <SummaryTile label="Unidades" value={formatQuantity(totalUnits)} />
-      <SummaryTile label="Movimientos" value={movementCount} />
-    </div>
-  );
-}
-
-function SummaryTile({ label, value }: { label: string; value: number | string }) {
-  return (
-    <div className="rounded-lg border border-border bg-card p-4 shadow-sm">
-      <p className="text-sm text-muted-foreground">{label}</p>
-      <p className="mt-1 text-2xl font-semibold">{value}</p>
-    </div>
   );
 }
 
