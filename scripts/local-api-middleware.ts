@@ -148,6 +148,50 @@ interface OrderInput {
   }>;
 }
 
+type PurchaseOrderStatus = "draft" | "sent" | "received" | "cancelled";
+
+interface PurchaseOrderItem {
+  id: string;
+  articleId: string;
+  quantity: number;
+  unitCost: number;
+  notes?: string;
+}
+
+interface PurchaseOrderItemInput {
+  articleId: string;
+  quantity: number;
+  unitCost: number;
+  notes?: string;
+}
+
+interface PurchaseOrder {
+  id: string;
+  orderNumber: string;
+  supplierName: string;
+  supplierContact?: string;
+  expectedDate?: string;
+  status: PurchaseOrderStatus;
+  paymentTerms?: string;
+  notes?: string;
+  items: PurchaseOrderItem[];
+  createdAt: string;
+  updatedAt: string;
+  receivedAt?: string;
+  inventoryPostedAt?: string;
+  userId?: string;
+}
+
+interface PurchaseOrderInput {
+  supplierName: string;
+  supplierContact?: string;
+  expectedDate?: string;
+  status: PurchaseOrderStatus;
+  paymentTerms?: string;
+  notes?: string;
+  items: PurchaseOrderItemInput[];
+}
+
 interface LocalApiState {
   document: StorageDocument;
   backups: LocalBackup[];
@@ -156,6 +200,7 @@ interface LocalApiState {
   catalogArticles: Omit<CatalogArticle, "categoryName">[];
   inventoryMovements: InventoryMovement[];
   orders: Order[];
+  purchaseOrders: PurchaseOrder[];
 }
 
 interface AuthSession {
@@ -781,6 +826,114 @@ async function handleLocalApiRequest(input: {
     return;
   }
 
+  if (pathname === "/api/purchase-orders" && method === "GET") {
+    sendJson(response, 200, getPurchaseOrdersForSession(state, session));
+    return;
+  }
+
+  if (pathname === "/api/purchase-orders" && method === "POST") {
+    if (session.role !== "user") {
+      sendJson(response, 403, { error: "Forbidden." });
+      return;
+    }
+
+    const input = readPurchaseOrderInput(await readJsonBody(request));
+
+    if (
+      input === null ||
+      input.items.some(
+        (item) =>
+          !state.catalogArticles.some(
+            (article) => article.id === item.articleId && article.userId === session.userId
+          )
+      )
+    ) {
+      sendJson(response, 400, { error: "Invalid purchase order." });
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const order: PurchaseOrder = {
+      id: crypto.randomUUID(),
+      orderNumber: createLocalPurchaseOrderNumber(state, session),
+      supplierName: input.supplierName,
+      ...(input.supplierContact ? { supplierContact: input.supplierContact } : {}),
+      ...(input.expectedDate ? { expectedDate: input.expectedDate } : {}),
+      status: input.status,
+      ...(input.paymentTerms ? { paymentTerms: input.paymentTerms } : {}),
+      ...(input.notes ? { notes: input.notes } : {}),
+      items: input.items.map((item) => ({
+        id: crypto.randomUUID(),
+        articleId: item.articleId,
+        quantity: item.quantity,
+        unitCost: item.unitCost,
+        ...(item.notes ? { notes: item.notes } : {})
+      })),
+      createdAt: now,
+      updatedAt: now,
+      ...(input.status === "received" ? { receivedAt: now, inventoryPostedAt: now } : {}),
+      userId: session.userId
+    };
+
+    state.purchaseOrders.push(order);
+    if (input.status === "received") {
+      postLocalPurchaseOrderEffects(state, order, session, now);
+    }
+
+    await writeState(dataFilePath, state);
+    sendJson(response, 201, {
+      order: hydratePurchaseOrder(state, order)
+    });
+    return;
+  }
+
+  const purchaseOrderStatusRoute = pathname.match(
+    /^\/api\/purchase-orders\/([^/]+)\/status$/
+  );
+
+  if (purchaseOrderStatusRoute && method === "PATCH") {
+    if (session.role !== "user") {
+      sendJson(response, 403, { error: "Forbidden." });
+      return;
+    }
+
+    const id = decodeURIComponent(purchaseOrderStatusRoute[1]);
+    const body = await readJsonBody(request);
+    const status = isRecord(body) ? readPurchaseOrderStatus(body.status) : null;
+    const order = state.purchaseOrders.find(
+      (current) => current.id === id && current.userId === session.userId
+    );
+
+    if (!order || status === null || status === "draft") {
+      sendJson(response, order ? 400 : 404, {
+        error: order ? "Invalid purchase order status." : "Not found."
+      });
+      return;
+    }
+
+    if (order.status === "cancelled" || order.status === "received") {
+      sendJson(response, 409, { error: "Status is closed." });
+      return;
+    }
+
+    const now = new Date().toISOString();
+    order.status = status;
+    order.updatedAt = now;
+    if (status === "received") {
+      order.receivedAt = now;
+      if (!order.inventoryPostedAt) {
+        order.inventoryPostedAt = now;
+        postLocalPurchaseOrderEffects(state, order, session, now);
+      }
+    }
+
+    await writeState(dataFilePath, state);
+    sendJson(response, 200, {
+      order: hydratePurchaseOrder(state, order)
+    });
+    return;
+  }
+
   const transactionRoute = pathname.match(/^\/api\/transactions\/([^/]+)$/);
 
   if (transactionRoute && method === "PUT") {
@@ -862,18 +1015,19 @@ async function readState(filePath: string): Promise<LocalApiState> {
     const parsed = JSON.parse(content) as unknown;
 
     if (isState(parsed)) {
-      return {
+      return ensureLocalPurchaseOrderTransactions({
         ...parsed,
         users: parsed.users ?? [],
         catalogCategories: parsed.catalogCategories ?? [],
         catalogArticles: parsed.catalogArticles ?? [],
         inventoryMovements: parsed.inventoryMovements ?? [],
         orders: parsed.orders ?? [],
+        purchaseOrders: parsed.purchaseOrders ?? [],
         document: {
           ...parsed.document,
           transactions: parsed.document.transactions
         }
-      };
+      });
     }
   } catch {
     return createEmptyState();
@@ -899,8 +1053,57 @@ function createEmptyState(): LocalApiState {
     catalogCategories: [],
     catalogArticles: [],
     inventoryMovements: [],
-    orders: []
+    orders: [],
+    purchaseOrders: []
   };
+}
+
+function ensureLocalPurchaseOrderTransactions(state: LocalApiState) {
+  let changed = false;
+
+  for (const order of state.purchaseOrders) {
+    if (
+      order.status !== "received" ||
+      state.document.transactions.some(
+        (transaction) => transaction.notes?.includes(order.id)
+      )
+    ) {
+      continue;
+    }
+
+    const createdAt = order.receivedAt ?? order.updatedAt ?? order.createdAt;
+    const totalAmount = order.items.reduce(
+      (total, item) => total + item.quantity * item.unitCost,
+      0
+    );
+
+    if (totalAmount <= 0) {
+      continue;
+    }
+
+    state.document.transactions.push({
+      id: `purchase-${order.id}`,
+      userId: order.userId,
+      type: "expense",
+      date: createdAt.slice(0, 10),
+      amount: roundMoney(totalAmount),
+      category: "other_expense",
+      description: `Orden de compra ${order.orderNumber} - ${order.supplierName}`,
+      paymentMethod: "bank_transfer",
+      notes: order.paymentTerms
+        ? `Condiciones: ${order.paymentTerms}. Orden de compra ${order.orderNumber} (${order.id})`
+        : `Orden de compra ${order.orderNumber} (${order.id})`,
+      createdAt,
+      updatedAt: createdAt
+    });
+    changed = true;
+  }
+
+  if (changed) {
+    state.document.lastUpdatedAt = new Date().toISOString();
+  }
+
+  return state;
 }
 
 function validateAuthConfig(env: LocalApiEnv) {
@@ -1267,6 +1470,113 @@ function createLocalOrder(
   return { ok: true, order, transaction, movements };
 }
 
+function getPurchaseOrdersForSession(
+  state: LocalApiState,
+  session: AuthSession
+) {
+  return {
+    orders: state.purchaseOrders
+      .filter((order) => session.role === "admin" || order.userId === session.userId)
+      .map((order) => hydratePurchaseOrder(state, order))
+      .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+  };
+}
+
+function hydratePurchaseOrder(state: LocalApiState, order: PurchaseOrder) {
+  const items = order.items.map((item) => {
+    const article = state.catalogArticles.find(
+      (current) => current.id === item.articleId
+    );
+    const category = article
+      ? state.catalogCategories.find((current) => current.id === article.categoryId)
+      : null;
+
+    return {
+      id: item.id,
+      articleId: item.articleId,
+      articleName: article?.name ?? "Producto eliminado",
+      categoryName: category?.name ?? "Sin categoria",
+      quantity: item.quantity,
+      unitCost: item.unitCost,
+      lineTotal: item.quantity * item.unitCost,
+      ...(item.notes ? { notes: item.notes } : {})
+    };
+  });
+
+  return {
+    id: order.id,
+    orderNumber: order.orderNumber,
+    supplierName: order.supplierName,
+    ...(order.supplierContact ? { supplierContact: order.supplierContact } : {}),
+    ...(order.expectedDate ? { expectedDate: order.expectedDate } : {}),
+    status: order.status,
+    ...(order.paymentTerms ? { paymentTerms: order.paymentTerms } : {}),
+    ...(order.notes ? { notes: order.notes } : {}),
+    items,
+    totalAmount: items.reduce((total, item) => total + item.lineTotal, 0),
+    createdAt: order.createdAt,
+    updatedAt: order.updatedAt,
+    ...(order.receivedAt ? { receivedAt: order.receivedAt } : {}),
+    ...(order.inventoryPostedAt
+      ? { inventoryPostedAt: order.inventoryPostedAt }
+      : {}),
+    ...(order.userId ? { userId: order.userId } : {})
+  };
+}
+
+function postLocalPurchaseOrderEffects(
+  state: LocalApiState,
+  order: PurchaseOrder,
+  session: AuthSession,
+  createdAt: string
+) {
+  const totalAmount = order.items.reduce(
+    (total, item) => total + item.quantity * item.unitCost,
+    0
+  );
+
+  state.document.transactions.push({
+    id: crypto.randomUUID(),
+    userId: session.userId,
+    type: "expense",
+    date: createdAt.slice(0, 10),
+    amount: roundMoney(totalAmount),
+    category: "other_expense",
+    description: `Orden de compra ${order.orderNumber} - ${order.supplierName}`,
+    paymentMethod: "bank_transfer",
+    notes: order.paymentTerms
+      ? `Condiciones: ${order.paymentTerms}. Orden de compra ${order.orderNumber} (${order.id})`
+      : `Orden de compra ${order.orderNumber} (${order.id})`,
+    createdAt,
+    updatedAt: createdAt
+  });
+  state.document.lastUpdatedAt = createdAt;
+
+  for (const item of order.items) {
+    state.inventoryMovements.push({
+      id: crypto.randomUUID(),
+      articleId: item.articleId,
+      type: "in",
+      quantity: item.quantity,
+      reason: `Recepcion ${order.orderNumber}`,
+      notes: `Orden de compra ${order.orderNumber} (${order.id})`,
+      createdAt,
+      userId: session.userId
+    });
+  }
+}
+
+function createLocalPurchaseOrderNumber(
+  state: LocalApiState,
+  session: AuthSession
+) {
+  const count = state.purchaseOrders.filter(
+    (order) => order.userId === session.userId
+  ).length;
+
+  return `OC-${String(count + 1).padStart(5, "0")}`;
+}
+
 function stripUserSecrets(user: LocalUser) {
   return {
     id: user.id,
@@ -1480,6 +1790,91 @@ function isInventoryMovementType(value: unknown): value is InventoryMovementType
   return value === "in" || value === "out" || value === "adjustment";
 }
 
+function readPurchaseOrderInput(value: unknown): PurchaseOrderInput | null {
+  if (!isRecord(value) || typeof value.supplierName !== "string") {
+    return null;
+  }
+
+  const supplierName = value.supplierName.trim();
+  const status = readPurchaseOrderStatus(value.status);
+  const items = Array.isArray(value.items)
+    ? value.items.map(readPurchaseOrderItemInput)
+    : [];
+
+  if (
+    supplierName.length === 0 ||
+    status === null ||
+    status === "cancelled" ||
+    items.length === 0 ||
+    items.some((item) => item === null)
+  ) {
+    return null;
+  }
+
+  return {
+    supplierName,
+    status,
+    ...(typeof value.supplierContact === "string" && value.supplierContact.trim()
+      ? { supplierContact: value.supplierContact.trim() }
+      : {}),
+    ...(typeof value.expectedDate === "string" && value.expectedDate.trim()
+      ? { expectedDate: value.expectedDate.trim() }
+      : {}),
+    ...(typeof value.paymentTerms === "string" && value.paymentTerms.trim()
+      ? { paymentTerms: value.paymentTerms.trim() }
+      : {}),
+    ...(typeof value.notes === "string" && value.notes.trim()
+      ? { notes: value.notes.trim() }
+      : {}),
+    items: items as PurchaseOrderItemInput[]
+  };
+}
+
+function readPurchaseOrderItemInput(
+  value: unknown
+): PurchaseOrderItemInput | null {
+  if (
+    !isRecord(value) ||
+    typeof value.articleId !== "string" ||
+    typeof value.quantity !== "number" ||
+    typeof value.unitCost !== "number"
+  ) {
+    return null;
+  }
+
+  const articleId = value.articleId.trim();
+
+  if (
+    articleId.length === 0 ||
+    !Number.isFinite(value.quantity) ||
+    !Number.isFinite(value.unitCost) ||
+    value.quantity <= 0 ||
+    value.unitCost < 0
+  ) {
+    return null;
+  }
+
+  return {
+    articleId,
+    quantity: value.quantity,
+    unitCost: value.unitCost,
+    ...(typeof value.notes === "string" && value.notes.trim()
+      ? { notes: value.notes.trim() }
+      : {})
+  };
+}
+
+function readPurchaseOrderStatus(
+  value: unknown
+): PurchaseOrderStatus | null {
+  return value === "draft" ||
+    value === "sent" ||
+    value === "received" ||
+    value === "cancelled"
+    ? value
+    : null;
+}
+
 function readTransaction(value: unknown): FinancialTransaction | null {
   if (!isRecord(value)) {
     return null;
@@ -1554,7 +1949,8 @@ function isState(value: unknown): value is LocalApiState {
     (!("catalogArticles" in value) || Array.isArray(value.catalogArticles)) &&
     (!("inventoryMovements" in value) ||
       Array.isArray(value.inventoryMovements)) &&
-    (!("orders" in value) || Array.isArray(value.orders))
+    (!("orders" in value) || Array.isArray(value.orders)) &&
+    (!("purchaseOrders" in value) || Array.isArray(value.purchaseOrders))
   );
 }
 

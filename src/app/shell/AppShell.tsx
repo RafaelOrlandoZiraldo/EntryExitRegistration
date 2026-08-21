@@ -4,6 +4,7 @@ import {
   ClipboardList,
   LayoutDashboard,
   LogOut,
+  ShoppingBag,
   ShoppingCart,
   Users,
   WalletCards
@@ -64,6 +65,12 @@ export function AppShell() {
                   <Link to="/orders">
                     <ShoppingCart aria-hidden="true" className="mr-2 h-4 w-4" />
                     Pedidos
+                  </Link>
+                </Button>
+                <Button asChild variant="ghost">
+                  <Link to="/purchase-orders">
+                    <ShoppingBag aria-hidden="true" className="mr-2 h-4 w-4" />
+                    Compras
                   </Link>
                 </Button>
               </>
