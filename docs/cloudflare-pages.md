@@ -71,10 +71,17 @@ Aplicar la migracion SQL:
 
 ```text
 migrations/0001_create_transactions.sql
+migrations/0002_multi_user_roles.sql
+migrations/0003_catalog.sql
+migrations/0004_inventory.sql
+migrations/0005_orders.sql
+migrations/0006_purchase_orders.sql
+migrations/0007_purchase_order_transactions_backfill.sql
 ```
 
-La tabla `transactions` guarda los movimientos y `daily_backups` guarda backups
-automaticos diarios del documento versionado.
+Aplicarlas en orden. El backend actual usa tablas de usuarios, catalogo,
+inventario, pedidos y ordenes de compra; si dev solo tiene `0001`, las Pages
+Functions pueden fallar en runtime al consultar tablas inexistentes.
 
 ## SPA routing
 
