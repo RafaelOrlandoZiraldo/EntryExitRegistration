@@ -169,10 +169,16 @@ Crear una base D1 y vincularla al proyecto Pages con el binding:
 DB
 ```
 
-Aplicar la migracion:
+Aplicar todas las migraciones en orden:
 
 ```text
 migrations/0001_create_transactions.sql
+migrations/0002_multi_user_roles.sql
+migrations/0003_catalog.sql
+migrations/0004_inventory.sql
+migrations/0005_orders.sql
+migrations/0006_purchase_orders.sql
+migrations/0007_purchase_order_transactions_backfill.sql
 ```
 
 No se agregan Workers, KV, R2 ni Pages Functions separadas del proyecto Pages.

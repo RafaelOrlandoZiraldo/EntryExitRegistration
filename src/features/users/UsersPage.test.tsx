@@ -60,6 +60,9 @@ describe("UsersPage", () => {
 
     renderWithToast(<UsersPage usersService={usersService} />);
 
+    await user.click(
+      await screen.findByRole("button", { name: "Nuevo usuario" })
+    );
     await user.type(await screen.findByLabelText("Usuario"), "rafa");
     await user.type(screen.getByLabelText("Contrasena"), "password123");
     await user.click(screen.getByRole("button", { name: "Crear" }));
