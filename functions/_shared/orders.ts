@@ -180,6 +180,24 @@ export async function createOrder(
   await db.batch([
     db
       .prepare(
+        `INSERT INTO transactions
+         (id, type, date, amount, category, description, payment_method, notes,
+          created_at, updated_at, user_id)
+         VALUES (?, 'income', ?, ?, 'sale', ?, ?, ?, ?, ?, ?)`
+      )
+      .bind(
+        transactionId,
+        now.slice(0, 10),
+        totalAmount,
+        `Pedido ${orderNumber} - ${input.customerName}`,
+        input.paymentMethod,
+        input.notes ?? null,
+        now,
+        now,
+        session.userId
+      ),
+    db
+      .prepare(
         `INSERT INTO orders
          (id, order_number, customer_name, status, payment_method, total_amount,
           notes, transaction_id, created_at, updated_at, user_id)
@@ -216,24 +234,6 @@ export async function createOrder(
           item.lineTotal
         )
     ),
-    db
-      .prepare(
-        `INSERT INTO transactions
-         (id, type, date, amount, category, description, payment_method, notes,
-          created_at, updated_at, user_id)
-         VALUES (?, 'income', ?, ?, 'sale', ?, ?, ?, ?, ?, ?)`
-      )
-      .bind(
-        transactionId,
-        now.slice(0, 10),
-        totalAmount,
-        `Pedido ${orderNumber} - ${input.customerName}`,
-        input.paymentMethod,
-        input.notes ?? null,
-        now,
-        now,
-        session.userId
-      ),
     ...orderItems.map((item) =>
       db
         .prepare(
