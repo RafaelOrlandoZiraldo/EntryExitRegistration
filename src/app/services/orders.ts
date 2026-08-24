@@ -13,6 +13,7 @@ export interface OrderItem {
 export interface Order {
   id: string;
   orderNumber: string;
+  customerId?: string;
   customerName: string;
   status: OrderStatus;
   paymentMethod: string;
@@ -26,7 +27,7 @@ export interface Order {
 }
 
 export interface OrderInput {
-  customerName: string;
+  customerId: string;
   status: OrderStatus;
   paymentMethod: string;
   notes?: string;

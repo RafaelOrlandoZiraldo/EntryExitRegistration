@@ -89,6 +89,30 @@ interface CatalogArticleInput {
   active?: boolean;
 }
 
+interface Client {
+  id: string;
+  name: string;
+  document?: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+  notes?: string;
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+  userId?: string;
+}
+
+interface ClientInput {
+  name: string;
+  document?: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+  notes?: string;
+  active?: boolean;
+}
+
 type InventoryMovementType = "in" | "out" | "adjustment";
 
 interface InventoryMovement {
@@ -125,6 +149,7 @@ interface OrderItem {
 interface Order {
   id: string;
   orderNumber: string;
+  customerId?: string;
   customerName: string;
   status: OrderStatus;
   paymentMethod: string;
@@ -138,7 +163,7 @@ interface Order {
 }
 
 interface OrderInput {
-  customerName: string;
+  customerId: string;
   status: OrderStatus;
   paymentMethod: string;
   notes?: string;
@@ -198,6 +223,7 @@ interface LocalApiState {
   users: LocalUser[];
   catalogCategories: CatalogCategory[];
   catalogArticles: Omit<CatalogArticle, "categoryName">[];
+  clients: Client[];
   inventoryMovements: InventoryMovement[];
   orders: Order[];
   purchaseOrders: PurchaseOrder[];
@@ -713,6 +739,122 @@ async function handleLocalApiRequest(input: {
     return;
   }
 
+  if (pathname === "/api/clients" && method === "GET") {
+    sendJson(response, 200, {
+      clients: getClientsForSession(state, session)
+    });
+    return;
+  }
+
+  if (pathname === "/api/clients" && method === "POST") {
+    if (session.role !== "user") {
+      sendJson(response, 403, { error: "Forbidden." });
+      return;
+    }
+
+    const input = readClientInput(await readJsonBody(request));
+
+    if (input === null) {
+      sendJson(response, 400, { error: "Invalid client." });
+      return;
+    }
+
+    if (hasClientWithName(state, session, input.name)) {
+      sendJson(response, 409, { error: "Client name exists." });
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const client: Client = {
+      id: crypto.randomUUID(),
+      name: input.name,
+      ...(input.document ? { document: input.document } : {}),
+      ...(input.email ? { email: input.email } : {}),
+      ...(input.phone ? { phone: input.phone } : {}),
+      ...(input.address ? { address: input.address } : {}),
+      ...(input.notes ? { notes: input.notes } : {}),
+      active: input.active !== false,
+      createdAt: now,
+      updatedAt: now,
+      userId: session.userId
+    };
+
+    state.clients.push(client);
+    await writeState(dataFilePath, state);
+    sendJson(response, 201, { client });
+    return;
+  }
+
+  const clientRoute = pathname.match(/^\/api\/clients\/([^/]+)$/);
+
+  if (clientRoute && method === "PUT") {
+    if (session.role !== "user") {
+      sendJson(response, 403, { error: "Forbidden." });
+      return;
+    }
+
+    const id = decodeURIComponent(clientRoute[1]);
+    const input = readClientInput(await readJsonBody(request));
+
+    if (input === null) {
+      sendJson(response, 400, { error: "Invalid client." });
+      return;
+    }
+
+    if (hasClientWithName(state, session, input.name, id)) {
+      sendJson(response, 409, { error: "Client name exists." });
+      return;
+    }
+
+    const clientIndex = state.clients.findIndex(
+      (client) => client.id === id && client.userId === session.userId
+    );
+
+    if (clientIndex === -1) {
+      sendJson(response, 404, { error: "Not found." });
+      return;
+    }
+
+    state.clients[clientIndex] = {
+      ...state.clients[clientIndex],
+      name: input.name,
+      document: input.document,
+      email: input.email,
+      phone: input.phone,
+      address: input.address,
+      notes: input.notes,
+      active: input.active !== false,
+      updatedAt: new Date().toISOString()
+    };
+    await writeState(dataFilePath, state);
+    sendJson(response, 200, { client: state.clients[clientIndex] });
+    return;
+  }
+
+  if (clientRoute && method === "DELETE") {
+    if (session.role !== "user") {
+      sendJson(response, 403, { error: "Forbidden." });
+      return;
+    }
+
+    const id = decodeURIComponent(clientRoute[1]);
+    const hasOrders = state.orders.some(
+      (order) => order.customerId === id && order.userId === session.userId
+    );
+
+    if (hasOrders) {
+      sendJson(response, 409, { error: "Client has orders." });
+      return;
+    }
+
+    state.clients = state.clients.filter(
+      (client) => client.id !== id || client.userId !== session.userId
+    );
+    await writeState(dataFilePath, state);
+    sendJson(response, 200, { ok: true });
+    return;
+  }
+
   if (pathname === "/api/inventory" && method === "GET") {
     sendJson(response, 200, getInventoryForSession(state, session));
     return;
@@ -1020,6 +1162,7 @@ async function readState(filePath: string): Promise<LocalApiState> {
         users: parsed.users ?? [],
         catalogCategories: parsed.catalogCategories ?? [],
         catalogArticles: parsed.catalogArticles ?? [],
+        clients: parsed.clients ?? [],
         inventoryMovements: parsed.inventoryMovements ?? [],
         orders: parsed.orders ?? [],
         purchaseOrders: parsed.purchaseOrders ?? [],
@@ -1052,6 +1195,7 @@ function createEmptyState(): LocalApiState {
     users: [],
     catalogCategories: [],
     catalogArticles: [],
+    clients: [],
     inventoryMovements: [],
     orders: [],
     purchaseOrders: []
@@ -1364,6 +1508,32 @@ function hydrateInventoryMovement(
   };
 }
 
+function getClientsForSession(state: LocalApiState, session: AuthSession) {
+  return state.clients
+    .filter((client) => session.role === "admin" || client.userId === session.userId)
+    .sort((left, right) => {
+      if (left.active !== right.active) {
+        return left.active ? -1 : 1;
+      }
+
+      return left.name.localeCompare(right.name, "es", { sensitivity: "base" });
+    });
+}
+
+function hasClientWithName(
+  state: LocalApiState,
+  session: AuthSession,
+  name: string,
+  exceptId?: string
+) {
+  return state.clients.some(
+    (client) =>
+      client.userId === session.userId &&
+      client.id !== exceptId &&
+      client.name.localeCompare(name, "es", { sensitivity: "base" }) === 0
+  );
+}
+
 function getOrdersForSession(state: LocalApiState, session: AuthSession) {
   return state.orders
     .filter((order) => session.role === "admin" || order.userId === session.userId)
@@ -1388,12 +1558,22 @@ function createLocalOrder(
   const stockByArticleId = new Map(
     inventory.items.map((item) => [item.articleId, item.quantity])
   );
+  const client = state.clients.find(
+    (candidate) =>
+      candidate.id === input.customerId &&
+      candidate.userId === session.userId &&
+      candidate.active
+  );
   const requestedItems = mergeOrderItems(input.items);
   const now = new Date().toISOString();
   const orderId = crypto.randomUUID();
   const transactionId = crypto.randomUUID();
   const orderNumber = createOrderNumber(now);
   const orderItems: OrderItem[] = [];
+
+  if (!client) {
+    return { ok: false, error: "Invalid client." };
+  }
 
   for (const item of requestedItems) {
     const article = articlesById.get(item.articleId);
@@ -1432,7 +1612,8 @@ function createLocalOrder(
   const order: Order = {
     id: orderId,
     orderNumber,
-    customerName: input.customerName,
+    customerId: client.id,
+    customerName: client.name,
     status: input.status,
     paymentMethod: input.paymentMethod,
     totalAmount,
@@ -1450,7 +1631,7 @@ function createLocalOrder(
     date: now.slice(0, 10),
     amount: totalAmount,
     category: "sale",
-    description: `Pedido ${orderNumber} - ${input.customerName}`,
+    description: `Pedido ${orderNumber} - ${client.name}`,
     paymentMethod: input.paymentMethod,
     ...(input.notes ? { notes: input.notes } : {}),
     createdAt: now,
@@ -1462,7 +1643,7 @@ function createLocalOrder(
     type: "out",
     quantity: item.quantity,
     reason: `Pedido ${orderNumber}`,
-    notes: input.customerName,
+    notes: client.name,
     createdAt: now,
     userId: session.userId
   }));
@@ -1645,6 +1826,38 @@ function readArticleInput(value: unknown): CatalogArticleInput | null {
   };
 }
 
+function readClientInput(value: unknown): ClientInput | null {
+  if (!isRecord(value) || typeof value.name !== "string") {
+    return null;
+  }
+
+  const name = value.name.trim();
+
+  if (name.length === 0) {
+    return null;
+  }
+
+  return {
+    name,
+    ...(typeof value.document === "string" && value.document.trim()
+      ? { document: value.document.trim() }
+      : {}),
+    ...(typeof value.email === "string" && value.email.trim()
+      ? { email: value.email.trim() }
+      : {}),
+    ...(typeof value.phone === "string" && value.phone.trim()
+      ? { phone: value.phone.trim() }
+      : {}),
+    ...(typeof value.address === "string" && value.address.trim()
+      ? { address: value.address.trim() }
+      : {}),
+    ...(typeof value.notes === "string" && value.notes.trim()
+      ? { notes: value.notes.trim() }
+      : {}),
+    ...(typeof value.active === "boolean" ? { active: value.active } : {})
+  };
+}
+
 function readInventoryMovementInput(
   value: unknown
 ): InventoryMovementInput | null {
@@ -1685,7 +1898,7 @@ function readInventoryMovementInput(
 function readOrderInput(value: unknown): OrderInput | null {
   if (
     !isRecord(value) ||
-    typeof value.customerName !== "string" ||
+    typeof value.customerId !== "string" ||
     typeof value.paymentMethod !== "string" ||
     !isOrderStatus(value.status) ||
     !Array.isArray(value.items)
@@ -1693,12 +1906,12 @@ function readOrderInput(value: unknown): OrderInput | null {
     return null;
   }
 
-  const customerName = value.customerName.trim();
+  const customerId = value.customerId.trim();
   const paymentMethod = value.paymentMethod.trim();
   const items = value.items.map(readOrderItemInput);
 
   if (
-    customerName.length === 0 ||
+    customerId.length === 0 ||
     paymentMethod.length === 0 ||
     !isPaymentMethod(paymentMethod) ||
     items.length === 0 ||
@@ -1708,7 +1921,7 @@ function readOrderInput(value: unknown): OrderInput | null {
   }
 
   return {
-    customerName,
+    customerId,
     status: value.status,
     paymentMethod,
     items: items as OrderInput["items"],
@@ -1947,6 +2160,7 @@ function isState(value: unknown): value is LocalApiState {
     (!("catalogCategories" in value) ||
       Array.isArray(value.catalogCategories)) &&
     (!("catalogArticles" in value) || Array.isArray(value.catalogArticles)) &&
+    (!("clients" in value) || Array.isArray(value.clients)) &&
     (!("inventoryMovements" in value) ||
       Array.isArray(value.inventoryMovements)) &&
     (!("orders" in value) || Array.isArray(value.orders)) &&

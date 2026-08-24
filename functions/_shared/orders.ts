@@ -1,4 +1,5 @@
 import type { AuthSession } from "./types";
+import { assertActiveClientBelongsToUser } from "./clients";
 
 export type OrderStatus = "pending" | "confirmed" | "delivered" | "cancelled";
 
@@ -15,6 +16,7 @@ export interface OrderItem {
 export interface Order {
   id: string;
   orderNumber: string;
+  customerId?: string;
   customerName: string;
   status: OrderStatus;
   paymentMethod: string;
@@ -28,7 +30,7 @@ export interface Order {
 }
 
 export interface OrderInput {
-  customerName: string;
+  customerId: string;
   status: OrderStatus;
   paymentMethod: string;
   notes?: string;
@@ -41,6 +43,7 @@ export interface OrderInput {
 interface OrderRow {
   id: string;
   order_number: string;
+  customer_id: string | null;
   customer_name: string;
   status: OrderStatus;
   payment_method: string;
@@ -74,7 +77,7 @@ export async function listOrders(db: D1Database, session: AuthSession) {
   const statement =
     session.role === "admin"
       ? db.prepare(
-          `SELECT id, order_number, customer_name, status, payment_method,
+          `SELECT id, order_number, customer_id, customer_name, status, payment_method,
                   total_amount, notes, transaction_id, created_at, updated_at,
                   user_id
            FROM orders
@@ -82,7 +85,7 @@ export async function listOrders(db: D1Database, session: AuthSession) {
         )
       : db
           .prepare(
-            `SELECT id, order_number, customer_name, status, payment_method,
+            `SELECT id, order_number, customer_id, customer_name, status, payment_method,
                     total_amount, notes, transaction_id, created_at, updated_at,
                     user_id
              FROM orders
@@ -131,6 +134,7 @@ export async function createOrder(
   assertUserCanMutateOrders(session);
 
   const requestedItems = mergeOrderItems(input.items);
+  const client = await getClientForOrder(db, input.customerId, session);
   const articles = await getArticlesForOrder(db, requestedItems, session);
 
   if (articles.length !== requestedItems.length) {
@@ -189,7 +193,7 @@ export async function createOrder(
         transactionId,
         now.slice(0, 10),
         totalAmount,
-        `Pedido ${orderNumber} - ${input.customerName}`,
+        `Pedido ${orderNumber} - ${client.name}`,
         input.paymentMethod,
         input.notes ?? null,
         now,
@@ -199,14 +203,15 @@ export async function createOrder(
     db
       .prepare(
         `INSERT INTO orders
-         (id, order_number, customer_name, status, payment_method, total_amount,
+         (id, order_number, customer_id, customer_name, status, payment_method, total_amount,
           notes, transaction_id, created_at, updated_at, user_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         orderId,
         orderNumber,
-        input.customerName,
+        client.id,
+        client.name,
         input.status,
         input.paymentMethod,
         totalAmount,
@@ -246,7 +251,7 @@ export async function createOrder(
           item.articleId,
           item.quantity,
           `Pedido ${orderNumber}`,
-          input.customerName,
+          client.name,
           now,
           session.userId
         )
@@ -296,11 +301,11 @@ export function readOrderInput(value: unknown): OrderInput | null {
   }
 
   const candidate = value as Partial<OrderInput>;
-  const customerName = readRequiredText(candidate.customerName);
+  const customerId = readRequiredText(candidate.customerId);
   const paymentMethod = readRequiredText(candidate.paymentMethod);
 
   if (
-    !customerName ||
+    !customerId ||
     !paymentMethod ||
     !isPaymentMethod(paymentMethod) ||
     !isOrderStatus(candidate.status) ||
@@ -317,7 +322,7 @@ export function readOrderInput(value: unknown): OrderInput | null {
   }
 
   return {
-    customerName,
+    customerId,
     status: candidate.status,
     paymentMethod,
     items: items as OrderInput["items"],
@@ -338,7 +343,7 @@ export function readOrderStatusInput(value: unknown): OrderStatus | null {
 async function getOrder(db: D1Database, id: string, session: AuthSession) {
   const row = await db
     .prepare(
-      `SELECT id, order_number, customer_name, status, payment_method,
+      `SELECT id, order_number, customer_id, customer_name, status, payment_method,
               total_amount, notes, transaction_id, created_at, updated_at,
               user_id
        FROM orders
@@ -397,6 +402,25 @@ async function getArticlesForOrder(
   return result.results ?? [];
 }
 
+async function getClientForOrder(
+  db: D1Database,
+  id: string,
+  session: AuthSession
+) {
+  await assertActiveClientBelongsToUser(db, id, session);
+
+  const client = await db
+    .prepare("SELECT id, name FROM clients WHERE id = ? AND user_id = ?")
+    .bind(id, session.userId)
+    .first<{ id: string; name: string }>();
+
+  if (!client) {
+    throw new Error("Invalid client.");
+  }
+
+  return client;
+}
+
 function mergeOrderItems(items: OrderInput["items"]) {
   const quantitiesByArticle = items.reduce<Record<string, number>>(
     (quantities, item) => {
@@ -439,6 +463,7 @@ function mapOrderRow(row: OrderRow): Omit<Order, "items"> {
   return {
     id: row.id,
     orderNumber: row.order_number,
+    ...(row.customer_id ? { customerId: row.customer_id } : {}),
     customerName: row.customer_name,
     status: row.status,
     paymentMethod: row.payment_method,

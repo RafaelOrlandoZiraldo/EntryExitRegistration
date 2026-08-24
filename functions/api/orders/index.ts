@@ -46,6 +46,10 @@ export async function onRequestPost({ request, env }: PagesContext) {
       return jsonResponse({ error: "Invalid article." }, { status: 400 });
     }
 
+    if (error instanceof Error && error.message === "Invalid client.") {
+      return jsonResponse({ error: "Invalid client." }, { status: 400 });
+    }
+
     if (error instanceof Error && error.message === "Missing price.") {
       return jsonResponse({ error: "Missing price." }, { status: 400 });
     }
