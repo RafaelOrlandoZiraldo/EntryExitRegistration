@@ -113,6 +113,44 @@ interface ClientInput {
   active?: boolean;
 }
 
+interface Supplier {
+  id: string;
+  name: string;
+  taxId?: string;
+  contactName?: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+  city?: string;
+  province?: string;
+  country?: string;
+  paymentTerms?: string;
+  bankAccount?: string;
+  category?: string;
+  notes?: string;
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+  userId?: string;
+}
+
+interface SupplierInput {
+  name: string;
+  taxId?: string;
+  contactName?: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+  city?: string;
+  province?: string;
+  country?: string;
+  paymentTerms?: string;
+  bankAccount?: string;
+  category?: string;
+  notes?: string;
+  active?: boolean;
+}
+
 type InventoryMovementType = "in" | "out" | "adjustment";
 
 interface InventoryMovement {
@@ -193,6 +231,7 @@ interface PurchaseOrderItemInput {
 interface PurchaseOrder {
   id: string;
   orderNumber: string;
+  supplierId?: string;
   supplierName: string;
   supplierContact?: string;
   expectedDate?: string;
@@ -208,6 +247,7 @@ interface PurchaseOrder {
 }
 
 interface PurchaseOrderInput {
+  supplierId?: string;
   supplierName: string;
   supplierContact?: string;
   expectedDate?: string;
@@ -224,6 +264,7 @@ interface LocalApiState {
   catalogCategories: CatalogCategory[];
   catalogArticles: Omit<CatalogArticle, "categoryName">[];
   clients: Client[];
+  suppliers: Supplier[];
   inventoryMovements: InventoryMovement[];
   orders: Order[];
   purchaseOrders: PurchaseOrder[];
@@ -855,6 +896,136 @@ async function handleLocalApiRequest(input: {
     return;
   }
 
+  if (pathname === "/api/suppliers" && method === "GET") {
+    sendJson(response, 200, {
+      suppliers: getSuppliersForSession(state, session)
+    });
+    return;
+  }
+
+  if (pathname === "/api/suppliers" && method === "POST") {
+    if (session.role !== "user") {
+      sendJson(response, 403, { error: "Forbidden." });
+      return;
+    }
+
+    const input = readSupplierInput(await readJsonBody(request));
+
+    if (input === null) {
+      sendJson(response, 400, { error: "Invalid supplier." });
+      return;
+    }
+
+    if (hasSupplierWithName(state, session, input.name)) {
+      sendJson(response, 409, { error: "Supplier name exists." });
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const supplier: Supplier = {
+      id: crypto.randomUUID(),
+      name: input.name,
+      ...(input.taxId ? { taxId: input.taxId } : {}),
+      ...(input.contactName ? { contactName: input.contactName } : {}),
+      ...(input.email ? { email: input.email } : {}),
+      ...(input.phone ? { phone: input.phone } : {}),
+      ...(input.address ? { address: input.address } : {}),
+      ...(input.city ? { city: input.city } : {}),
+      ...(input.province ? { province: input.province } : {}),
+      ...(input.country ? { country: input.country } : {}),
+      ...(input.paymentTerms ? { paymentTerms: input.paymentTerms } : {}),
+      ...(input.bankAccount ? { bankAccount: input.bankAccount } : {}),
+      ...(input.category ? { category: input.category } : {}),
+      ...(input.notes ? { notes: input.notes } : {}),
+      active: input.active !== false,
+      createdAt: now,
+      updatedAt: now,
+      userId: session.userId
+    };
+
+    state.suppliers.push(supplier);
+    await writeState(dataFilePath, state);
+    sendJson(response, 201, { supplier });
+    return;
+  }
+
+  const supplierRoute = pathname.match(/^\/api\/suppliers\/([^/]+)$/);
+
+  if (supplierRoute && method === "PUT") {
+    if (session.role !== "user") {
+      sendJson(response, 403, { error: "Forbidden." });
+      return;
+    }
+
+    const id = decodeURIComponent(supplierRoute[1]);
+    const input = readSupplierInput(await readJsonBody(request));
+
+    if (input === null) {
+      sendJson(response, 400, { error: "Invalid supplier." });
+      return;
+    }
+
+    if (hasSupplierWithName(state, session, input.name, id)) {
+      sendJson(response, 409, { error: "Supplier name exists." });
+      return;
+    }
+
+    const supplierIndex = state.suppliers.findIndex(
+      (supplier) => supplier.id === id && supplier.userId === session.userId
+    );
+
+    if (supplierIndex === -1) {
+      sendJson(response, 404, { error: "Not found." });
+      return;
+    }
+
+    state.suppliers[supplierIndex] = {
+      ...state.suppliers[supplierIndex],
+      name: input.name,
+      taxId: input.taxId,
+      contactName: input.contactName,
+      email: input.email,
+      phone: input.phone,
+      address: input.address,
+      city: input.city,
+      province: input.province,
+      country: input.country,
+      paymentTerms: input.paymentTerms,
+      bankAccount: input.bankAccount,
+      category: input.category,
+      notes: input.notes,
+      active: input.active !== false,
+      updatedAt: new Date().toISOString()
+    };
+    await writeState(dataFilePath, state);
+    sendJson(response, 200, { supplier: state.suppliers[supplierIndex] });
+    return;
+  }
+
+  if (supplierRoute && method === "DELETE") {
+    if (session.role !== "user") {
+      sendJson(response, 403, { error: "Forbidden." });
+      return;
+    }
+
+    const id = decodeURIComponent(supplierRoute[1]);
+    const hasPurchaseOrders = state.purchaseOrders.some(
+      (order) => order.supplierId === id && order.userId === session.userId
+    );
+
+    if (hasPurchaseOrders) {
+      sendJson(response, 409, { error: "Supplier has purchase orders." });
+      return;
+    }
+
+    state.suppliers = state.suppliers.filter(
+      (supplier) => supplier.id !== id || supplier.userId !== session.userId
+    );
+    await writeState(dataFilePath, state);
+    sendJson(response, 200, { ok: true });
+    return;
+  }
+
   if (pathname === "/api/inventory" && method === "GET") {
     sendJson(response, 200, getInventoryForSession(state, session));
     return;
@@ -983,6 +1154,12 @@ async function handleLocalApiRequest(input: {
 
     if (
       input === null ||
+      !state.suppliers.some(
+        (supplier) =>
+          supplier.id === input.supplierId &&
+          supplier.userId === session.userId &&
+          supplier.active
+      ) ||
       input.items.some(
         (item) =>
           !state.catalogArticles.some(
@@ -998,6 +1175,7 @@ async function handleLocalApiRequest(input: {
     const order: PurchaseOrder = {
       id: crypto.randomUUID(),
       orderNumber: createLocalPurchaseOrderNumber(state, session),
+      ...(input.supplierId ? { supplierId: input.supplierId } : {}),
       supplierName: input.supplierName,
       ...(input.supplierContact ? { supplierContact: input.supplierContact } : {}),
       ...(input.expectedDate ? { expectedDate: input.expectedDate } : {}),
@@ -1163,6 +1341,7 @@ async function readState(filePath: string): Promise<LocalApiState> {
         catalogCategories: parsed.catalogCategories ?? [],
         catalogArticles: parsed.catalogArticles ?? [],
         clients: parsed.clients ?? [],
+        suppliers: parsed.suppliers ?? [],
         inventoryMovements: parsed.inventoryMovements ?? [],
         orders: parsed.orders ?? [],
         purchaseOrders: parsed.purchaseOrders ?? [],
@@ -1196,6 +1375,7 @@ function createEmptyState(): LocalApiState {
     catalogCategories: [],
     catalogArticles: [],
     clients: [],
+    suppliers: [],
     inventoryMovements: [],
     orders: [],
     purchaseOrders: []
@@ -1534,6 +1714,32 @@ function hasClientWithName(
   );
 }
 
+function getSuppliersForSession(state: LocalApiState, session: AuthSession) {
+  return state.suppliers
+    .filter((supplier) => session.role === "admin" || supplier.userId === session.userId)
+    .sort((left, right) => {
+      if (left.active !== right.active) {
+        return left.active ? -1 : 1;
+      }
+
+      return left.name.localeCompare(right.name, "es", { sensitivity: "base" });
+    });
+}
+
+function hasSupplierWithName(
+  state: LocalApiState,
+  session: AuthSession,
+  name: string,
+  exceptId?: string
+) {
+  return state.suppliers.some(
+    (supplier) =>
+      supplier.userId === session.userId &&
+      supplier.id !== exceptId &&
+      supplier.name.localeCompare(name, "es", { sensitivity: "base" }) === 0
+  );
+}
+
 function getOrdersForSession(state: LocalApiState, session: AuthSession) {
   return state.orders
     .filter((order) => session.role === "admin" || order.userId === session.userId)
@@ -1687,6 +1893,7 @@ function hydratePurchaseOrder(state: LocalApiState, order: PurchaseOrder) {
   return {
     id: order.id,
     orderNumber: order.orderNumber,
+    ...(order.supplierId ? { supplierId: order.supplierId } : {}),
     supplierName: order.supplierName,
     ...(order.supplierContact ? { supplierContact: order.supplierContact } : {}),
     ...(order.expectedDate ? { expectedDate: order.expectedDate } : {}),
@@ -1858,6 +2065,59 @@ function readClientInput(value: unknown): ClientInput | null {
   };
 }
 
+function readSupplierInput(value: unknown): SupplierInput | null {
+  if (!isRecord(value) || typeof value.name !== "string") {
+    return null;
+  }
+
+  const name = value.name.trim();
+
+  if (name.length === 0) {
+    return null;
+  }
+
+  return {
+    name,
+    ...(typeof value.taxId === "string" && value.taxId.trim()
+      ? { taxId: value.taxId.trim() }
+      : {}),
+    ...(typeof value.contactName === "string" && value.contactName.trim()
+      ? { contactName: value.contactName.trim() }
+      : {}),
+    ...(typeof value.email === "string" && value.email.trim()
+      ? { email: value.email.trim() }
+      : {}),
+    ...(typeof value.phone === "string" && value.phone.trim()
+      ? { phone: value.phone.trim() }
+      : {}),
+    ...(typeof value.address === "string" && value.address.trim()
+      ? { address: value.address.trim() }
+      : {}),
+    ...(typeof value.city === "string" && value.city.trim()
+      ? { city: value.city.trim() }
+      : {}),
+    ...(typeof value.province === "string" && value.province.trim()
+      ? { province: value.province.trim() }
+      : {}),
+    ...(typeof value.country === "string" && value.country.trim()
+      ? { country: value.country.trim() }
+      : {}),
+    ...(typeof value.paymentTerms === "string" && value.paymentTerms.trim()
+      ? { paymentTerms: value.paymentTerms.trim() }
+      : {}),
+    ...(typeof value.bankAccount === "string" && value.bankAccount.trim()
+      ? { bankAccount: value.bankAccount.trim() }
+      : {}),
+    ...(typeof value.category === "string" && value.category.trim()
+      ? { category: value.category.trim() }
+      : {}),
+    ...(typeof value.notes === "string" && value.notes.trim()
+      ? { notes: value.notes.trim() }
+      : {}),
+    ...(typeof value.active === "boolean" ? { active: value.active } : {})
+  };
+}
+
 function readInventoryMovementInput(
   value: unknown
 ): InventoryMovementInput | null {
@@ -2004,10 +2264,15 @@ function isInventoryMovementType(value: unknown): value is InventoryMovementType
 }
 
 function readPurchaseOrderInput(value: unknown): PurchaseOrderInput | null {
-  if (!isRecord(value) || typeof value.supplierName !== "string") {
+  if (
+    !isRecord(value) ||
+    typeof value.supplierId !== "string" ||
+    typeof value.supplierName !== "string"
+  ) {
     return null;
   }
 
+  const supplierId = value.supplierId.trim();
   const supplierName = value.supplierName.trim();
   const status = readPurchaseOrderStatus(value.status);
   const items = Array.isArray(value.items)
@@ -2015,6 +2280,7 @@ function readPurchaseOrderInput(value: unknown): PurchaseOrderInput | null {
     : [];
 
   if (
+    supplierId.length === 0 ||
     supplierName.length === 0 ||
     status === null ||
     status === "cancelled" ||
@@ -2025,6 +2291,7 @@ function readPurchaseOrderInput(value: unknown): PurchaseOrderInput | null {
   }
 
   return {
+    supplierId,
     supplierName,
     status,
     ...(typeof value.supplierContact === "string" && value.supplierContact.trim()
@@ -2161,6 +2428,7 @@ function isState(value: unknown): value is LocalApiState {
       Array.isArray(value.catalogCategories)) &&
     (!("catalogArticles" in value) || Array.isArray(value.catalogArticles)) &&
     (!("clients" in value) || Array.isArray(value.clients)) &&
+    (!("suppliers" in value) || Array.isArray(value.suppliers)) &&
     (!("inventoryMovements" in value) ||
       Array.isArray(value.inventoryMovements)) &&
     (!("orders" in value) || Array.isArray(value.orders)) &&

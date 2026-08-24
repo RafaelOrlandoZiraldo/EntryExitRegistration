@@ -9,6 +9,7 @@ import {
   Menu,
   ShoppingBag,
   ShoppingCart,
+  Truck,
   Users,
   WalletCards,
   X
@@ -37,6 +38,7 @@ export function AppShell() {
             { href: "/transactions", label: "Movimientos", icon: ArrowLeftRight },
             { href: "/catalog", label: "Catalogo", icon: Boxes },
             { href: "/clients", label: "Clientes", icon: ContactRound },
+            { href: "/suppliers", label: "Proveedores", icon: Truck },
             { href: "/inventory", label: "Inventario", icon: ClipboardList },
             { href: "/orders", label: "Pedidos", icon: ShoppingCart },
             { href: "/purchase-orders", label: "Compras", icon: ShoppingBag }

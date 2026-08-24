@@ -14,6 +14,7 @@ export interface PurchaseOrderItem {
 export interface PurchaseOrder {
   id: string;
   orderNumber: string;
+  supplierId?: string;
   supplierName: string;
   supplierContact?: string;
   expectedDate?: string;
@@ -37,6 +38,7 @@ export interface PurchaseOrderItemInput {
 }
 
 export interface PurchaseOrderInput {
+  supplierId?: string;
   supplierName: string;
   supplierContact?: string;
   expectedDate?: string;
