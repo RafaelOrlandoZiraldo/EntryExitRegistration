@@ -6,6 +6,7 @@ import { clientServices } from "@app/services/clients";
 import { inventoryServices } from "@app/services/inventory";
 import { orderServices } from "@app/services/orders";
 import { purchaseOrderServices } from "@app/services/purchaseOrders";
+import { supplierServices } from "@app/services/suppliers";
 import { transactionServices } from "@app/services/transactions";
 import { userServices } from "@app/services/users";
 import { AppShell } from "@app/shell/AppShell";
@@ -22,6 +23,7 @@ import { HomePage } from "@features/home/HomePage";
 import { InventoryPage } from "@features/inventory";
 import { OrdersPage } from "@features/orders";
 import { PurchaseOrdersPage } from "@features/purchase-orders";
+import { SuppliersPage } from "@features/suppliers";
 import { TransactionsPage } from "@features/transactions";
 import { UsersPage } from "@features/users";
 
@@ -100,6 +102,12 @@ export const router = createBrowserRouter([
                 )
               },
               {
+                path: "suppliers",
+                element: (
+                  <SuppliersPage suppliersService={supplierServices.suppliers} />
+                )
+              },
+              {
                 path: "inventory",
                 element: (
                   <InventoryPage
@@ -125,6 +133,7 @@ export const router = createBrowserRouter([
                     purchaseOrdersService={
                       purchaseOrderServices.purchaseOrders
                     }
+                    suppliersService={supplierServices.suppliers}
                   />
                 )
               }

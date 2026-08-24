@@ -16,6 +16,7 @@ import type {
   PurchaseOrderStatus,
   PurchaseOrdersSnapshot
 } from "@app/services/purchaseOrders";
+import type { Supplier, SuppliersSnapshot } from "@app/services/suppliers";
 import {
   Button,
   Dialog,
@@ -43,6 +44,9 @@ interface PurchaseOrdersPageProps {
       status: Exclude<PurchaseOrderStatus, "draft">
     ): Promise<PurchaseOrder>;
   };
+  suppliersService: {
+    list(this: void): Promise<SuppliersSnapshot>;
+  };
 }
 
 interface OrderLineDraft {
@@ -53,6 +57,7 @@ interface OrderLineDraft {
 }
 
 interface OrderDraft {
+  supplierId: string;
   supplierName: string;
   supplierContact: string;
   expectedDate: string;
@@ -64,10 +69,16 @@ interface OrderDraft {
 
 type LoadState =
   | { status: "loading" }
-  | { status: "success"; inventory: InventorySnapshot; orders: PurchaseOrder[] }
+  | {
+      status: "success";
+      inventory: InventorySnapshot;
+      orders: PurchaseOrder[];
+      suppliers: Supplier[];
+    }
   | { status: "error"; error: string };
 
 const emptyDraft: OrderDraft = {
+  supplierId: "",
   supplierName: "",
   supplierContact: "",
   expectedDate: "",
@@ -79,7 +90,8 @@ const emptyDraft: OrderDraft = {
 
 export function PurchaseOrdersPage({
   inventoryService,
-  purchaseOrdersService
+  purchaseOrdersService,
+  suppliersService
 }: PurchaseOrdersPageProps) {
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [draft, setDraft] = useState<OrderDraft>(emptyDraft);
@@ -89,12 +101,17 @@ export function PurchaseOrdersPage({
 
   const loadPurchaseOrders = useCallback(() => {
     setState({ status: "loading" });
-    void Promise.all([inventoryService.list(), purchaseOrdersService.list()])
-      .then(([inventory, ordersSnapshot]) => {
+    void Promise.all([
+      inventoryService.list(),
+      purchaseOrdersService.list(),
+      suppliersService.list()
+    ])
+      .then(([inventory, ordersSnapshot, suppliersSnapshot]) => {
         setState({
           status: "success",
           inventory,
-          orders: ordersSnapshot.orders
+          orders: ordersSnapshot.orders,
+          suppliers: suppliersSnapshot.suppliers
         });
         setDraft((current) => ({
           ...current,
@@ -110,7 +127,7 @@ export function PurchaseOrdersPage({
           error: "No se pudieron cargar las ordenes de compra."
         });
       });
-  }, [inventoryService, purchaseOrdersService]);
+  }, [inventoryService, purchaseOrdersService, suppliersService]);
 
   useEffect(() => {
     loadPurchaseOrders();
@@ -127,6 +144,14 @@ export function PurchaseOrdersPage({
   const orders = useMemo(
     () => (state.status === "success" ? state.orders : []),
     [state]
+  );
+  const suppliers = useMemo(
+    () => (state.status === "success" ? state.suppliers : []),
+    [state]
+  );
+  const activeSuppliers = useMemo(
+    () => suppliers.filter((supplier) => supplier.active),
+    [suppliers]
   );
   const draftTotal = useMemo(
     () =>
@@ -263,8 +288,11 @@ export function PurchaseOrdersPage({
 
               <PurchaseOrderForm
                 draft={draft}
-                disabled={isSubmitting || items.length === 0}
+                disabled={
+                  isSubmitting || items.length === 0 || activeSuppliers.length === 0
+                }
                 items={activeItems.length > 0 ? activeItems : items}
+                suppliers={activeSuppliers}
                 total={draftTotal}
                 onChange={setDraft}
                 onSubmit={(options) => {
@@ -285,6 +313,7 @@ function PurchaseOrderForm({
   draft,
   disabled,
   items,
+  suppliers,
   total,
   onChange,
   onSubmit
@@ -292,6 +321,7 @@ function PurchaseOrderForm({
   draft: OrderDraft;
   disabled: boolean;
   items: InventoryItem[];
+  suppliers: Supplier[];
   total: number;
   onChange(this: void, draft: OrderDraft): void;
   onSubmit(this: void, options: { closeAfterSave: boolean }): void;
@@ -326,13 +356,34 @@ function PurchaseOrderForm({
       <div className="grid gap-4 md:grid-cols-[1.2fr_1fr_11rem]">
         <label className="grid gap-2 text-sm font-medium">
           Proveedor
-          <input
+          <select
             className={fieldClassName}
-            value={draft.supplierName}
+            value={draft.supplierId}
             onChange={(event) => {
-              onChange({ ...draft, supplierName: event.target.value });
+              const supplier = suppliers.find(
+                (current) => current.id === event.target.value
+              );
+
+              onChange({
+                ...draft,
+                supplierId: event.target.value,
+                supplierName: supplier?.name ?? "",
+                supplierContact:
+                  supplier?.contactName ||
+                  supplier?.email ||
+                  supplier?.phone ||
+                  "",
+                paymentTerms: supplier?.paymentTerms ?? ""
+              });
             }}
-          />
+          >
+            <option value="">Seleccionar</option>
+            {suppliers.map((supplier) => (
+              <option key={supplier.id} value={supplier.id}>
+                {supplier.name}
+              </option>
+            ))}
+          </select>
         </label>
         <label className="grid gap-2 text-sm font-medium">
           Contacto
@@ -388,6 +439,12 @@ function PurchaseOrderForm({
           />
         </label>
       </div>
+
+      {suppliers.length === 0 ? (
+        <p className="rounded-md border border-border bg-muted/60 p-3 text-sm text-muted-foreground">
+          Primero carga un proveedor activo para crear ordenes de compra.
+        </p>
+      ) : null}
 
       <div className="grid gap-3">
         {draft.items.map((line, index) => (
@@ -779,6 +836,7 @@ function StatusBadge({ status }: { status: PurchaseOrderStatus }) {
 }
 
 function parseOrderDraft(draft: OrderDraft): PurchaseOrderInput | null {
+  const supplierId = draft.supplierId.trim();
   const supplierName = draft.supplierName.trim();
   const items = draft.items
     .map((item) => ({
@@ -790,6 +848,7 @@ function parseOrderDraft(draft: OrderDraft): PurchaseOrderInput | null {
     .filter((item) => item.articleId);
 
   if (
+    !supplierId ||
     !supplierName ||
     items.length === 0 ||
     items.some(
@@ -804,6 +863,7 @@ function parseOrderDraft(draft: OrderDraft): PurchaseOrderInput | null {
   }
 
   return {
+    supplierId,
     supplierName,
     status: draft.status,
     ...(draft.supplierContact.trim()

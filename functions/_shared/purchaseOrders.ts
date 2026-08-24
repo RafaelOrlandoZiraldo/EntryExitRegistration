@@ -1,4 +1,5 @@
 import type { AuthSession } from "./types";
+import { assertActiveSupplierBelongsToUser } from "./suppliers";
 
 export type PurchaseOrderStatus = "draft" | "sent" | "received" | "cancelled";
 
@@ -16,6 +17,7 @@ export interface PurchaseOrderItem {
 export interface PurchaseOrder {
   id: string;
   orderNumber: string;
+  supplierId?: string;
   supplierName: string;
   supplierContact?: string;
   expectedDate?: string;
@@ -39,6 +41,7 @@ export interface PurchaseOrderItemInput {
 }
 
 export interface PurchaseOrderInput {
+  supplierId?: string;
   supplierName: string;
   supplierContact?: string;
   expectedDate?: string;
@@ -51,6 +54,7 @@ export interface PurchaseOrderInput {
 interface PurchaseOrderRow {
   id: string;
   order_number: string;
+  supplier_id: string | null;
   supplier_name: string;
   supplier_contact: string | null;
   expected_date: string | null;
@@ -83,16 +87,16 @@ export async function listPurchaseOrders(
     session.role === "admin"
       ? db.prepare(
           `SELECT id, order_number, supplier_name, supplier_contact,
-                  expected_date, status, payment_terms, notes, created_at,
-                  updated_at, received_at, inventory_posted_at, user_id
+                  supplier_id, expected_date, status, payment_terms, notes,
+                  created_at, updated_at, received_at, inventory_posted_at, user_id
            FROM purchase_orders
            ORDER BY created_at DESC`
         )
       : db
           .prepare(
             `SELECT id, order_number, supplier_name, supplier_contact,
-                    expected_date, status, payment_terms, notes, created_at,
-                    updated_at, received_at, inventory_posted_at, user_id
+                    supplier_id, expected_date, status, payment_terms, notes,
+                    created_at, updated_at, received_at, inventory_posted_at, user_id
              FROM purchase_orders
              WHERE user_id = ?
              ORDER BY created_at DESC`
@@ -117,6 +121,9 @@ export async function createPurchaseOrder(
 ) {
   assertUserCanMutatePurchaseOrders(session);
   await assertArticlesBelongToUser(db, input.items, session);
+  if (input.supplierId) {
+    await assertActiveSupplierBelongsToUser(db, input.supplierId, session);
+  }
 
   const now = new Date().toISOString();
   const id = crypto.randomUUID();
@@ -126,14 +133,15 @@ export async function createPurchaseOrder(
   await db
     .prepare(
       `INSERT INTO purchase_orders
-       (id, order_number, supplier_name, supplier_contact, expected_date,
+       (id, order_number, supplier_id, supplier_name, supplier_contact, expected_date,
         status, payment_terms, notes, created_at, updated_at, received_at,
         inventory_posted_at, user_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .bind(
       id,
       orderNumber,
+      input.supplierId ?? null,
       input.supplierName,
       input.supplierContact ?? null,
       input.expectedDate ?? null,
@@ -240,12 +248,14 @@ export function readPurchaseOrderInput(
   }
 
   const candidate = value as Partial<PurchaseOrderInput>;
+  const supplierId = readRequiredText(candidate.supplierId);
   const supplierName = readRequiredText(candidate.supplierName);
   const items = Array.isArray(candidate.items)
     ? candidate.items.map(readPurchaseOrderItemInput).filter(isPresent)
     : [];
 
   if (
+    !supplierId ||
     !supplierName ||
     !isPurchaseOrderStatus(candidate.status) ||
     candidate.status === "cancelled" ||
@@ -256,6 +266,7 @@ export function readPurchaseOrderInput(
   }
 
   return {
+    supplierId,
     supplierName,
     status: candidate.status,
     ...readOptionalTextProperty("supplierContact", candidate.supplierContact),
@@ -278,8 +289,8 @@ async function getPurchaseOrder(
   const row = await db
     .prepare(
       `SELECT id, order_number, supplier_name, supplier_contact,
-              expected_date, status, payment_terms, notes, created_at,
-              updated_at, received_at, inventory_posted_at, user_id
+              supplier_id, expected_date, status, payment_terms, notes,
+              created_at, updated_at, received_at, inventory_posted_at, user_id
        FROM purchase_orders
        WHERE id = ? AND user_id = ?`
     )
@@ -477,6 +488,7 @@ function mapOrderRow(
   return {
     id: row.id,
     orderNumber: row.order_number,
+    ...(row.supplier_id ? { supplierId: row.supplier_id } : {}),
     supplierName: row.supplier_name,
     ...(row.supplier_contact ? { supplierContact: row.supplier_contact } : {}),
     ...(row.expected_date ? { expectedDate: row.expected_date } : {}),
