@@ -6,6 +6,7 @@ import {
   ShoppingCart
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import type { Client, ClientsSnapshot } from "@app/services/clients";
 import type { InventoryItem, InventorySnapshot } from "@app/services/inventory";
 import type {
   Order,
@@ -28,6 +29,9 @@ import {
 } from "@shared/ui";
 
 interface OrdersPageProps {
+  clientsService: {
+    list(this: void): Promise<ClientsSnapshot>;
+  };
   inventoryService: {
     list(this: void): Promise<InventorySnapshot>;
   };
@@ -44,7 +48,7 @@ interface OrderDraftLine {
 }
 
 interface OrderDraft {
-  customerName: string;
+  customerId: string;
   status: OrderStatus;
   paymentMethod: string;
   notes: string;
@@ -53,18 +57,27 @@ interface OrderDraft {
 
 type LoadState =
   | { status: "loading" }
-  | { status: "success"; inventory: InventorySnapshot; orders: Order[] }
+  | {
+      status: "success";
+      clients: Client[];
+      inventory: InventorySnapshot;
+      orders: Order[];
+    }
   | { status: "error"; error: string };
 
 const emptyDraft: OrderDraft = {
-  customerName: "",
+  customerId: "",
   status: "confirmed",
   paymentMethod: "cash",
   notes: "",
   items: [{ articleId: "", quantity: "1" }]
 };
 
-export function OrdersPage({ inventoryService, ordersService }: OrdersPageProps) {
+export function OrdersPage({
+  clientsService,
+  inventoryService,
+  ordersService
+}: OrdersPageProps) {
   const [state, setState] = useState<LoadState>({ status: "loading" });
   const [draft, setDraft] = useState<OrderDraft>(emptyDraft);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -73,15 +86,24 @@ export function OrdersPage({ inventoryService, ordersService }: OrdersPageProps)
 
   const loadOrders = useCallback(() => {
     setState({ status: "loading" });
-    void Promise.all([inventoryService.list(), ordersService.list()])
-      .then(([inventory, ordersSnapshot]) => {
+    void Promise.all([
+      clientsService.list(),
+      inventoryService.list(),
+      ordersService.list()
+    ])
+      .then(([clientsSnapshot, inventory, ordersSnapshot]) => {
+        const activeClients = clientsSnapshot.clients.filter(
+          (client) => client.active
+        );
         setState({
           status: "success",
+          clients: clientsSnapshot.clients,
           inventory,
           orders: ordersSnapshot.orders
         });
         setDraft((current) => ({
           ...current,
+          customerId: current.customerId || activeClients[0]?.id || "",
           items: current.items.map((item) => ({
             ...item,
             articleId: item.articleId || inventory.items[0]?.articleId || ""
@@ -94,7 +116,7 @@ export function OrdersPage({ inventoryService, ordersService }: OrdersPageProps)
           error: "No se pudieron cargar los pedidos."
         });
       });
-  }, [inventoryService, ordersService]);
+  }, [clientsService, inventoryService, ordersService]);
 
   useEffect(() => {
     loadOrders();
@@ -102,6 +124,10 @@ export function OrdersPage({ inventoryService, ordersService }: OrdersPageProps)
 
   const items = useMemo(
     () => (state.status === "success" ? state.inventory.items : []),
+    [state]
+  );
+  const clients = useMemo(
+    () => (state.status === "success" ? state.clients : []),
     [state]
   );
   const orders = useMemo(
@@ -118,6 +144,10 @@ export function OrdersPage({ inventoryService, ordersService }: OrdersPageProps)
           item.price > 0
       ),
     [items]
+  );
+  const activeClients = useMemo(
+    () => clients.filter((client) => client.active),
+    [clients]
   );
   const articleById = useMemo(
     () => new Map(items.map((item) => [item.articleId, item])),
@@ -144,7 +174,7 @@ export function OrdersPage({ inventoryService, ordersService }: OrdersPageProps)
     if (!input) {
       notify({
         type: "warning",
-        message: "Carga cliente, medio de pago y al menos un producto valido."
+        message: "Selecciona cliente, medio de pago y al menos un producto valido."
       });
       return;
     }
@@ -156,6 +186,7 @@ export function OrdersPage({ inventoryService, ordersService }: OrdersPageProps)
       notify({ type: "success", message: "Pedido generado correctamente." });
       setDraft({
         ...emptyDraft,
+        customerId: activeClients[0]?.id || "",
         items: [{ articleId: sellableItems[0]?.articleId || "", quantity: "1" }]
       });
       if (options.closeAfterSave) {
@@ -228,7 +259,12 @@ export function OrdersPage({ inventoryService, ordersService }: OrdersPageProps)
 
               <OrderForm
                 draft={draft}
-                disabled={isSubmitting || sellableItems.length === 0}
+                clients={activeClients}
+                disabled={
+                  isSubmitting ||
+                  activeClients.length === 0 ||
+                  sellableItems.length === 0
+                }
                 items={sellableItems}
                 total={draftTotal}
                 onChange={setDraft}
@@ -247,6 +283,7 @@ export function OrdersPage({ inventoryService, ordersService }: OrdersPageProps)
 }
 
 function OrderForm({
+  clients,
   draft,
   disabled,
   items,
@@ -254,6 +291,7 @@ function OrderForm({
   onChange,
   onSubmit
 }: {
+  clients: Client[];
   draft: OrderDraft;
   disabled: boolean;
   items: InventoryItem[];
@@ -288,16 +326,29 @@ function OrderForm({
         </p>
       ) : null}
 
+      {clients.length === 0 ? (
+        <p className="rounded-md border border-border bg-muted/60 p-3 text-sm text-muted-foreground">
+          Para generar pedidos necesitas al menos un cliente activo.
+        </p>
+      ) : null}
+
       <div className="grid gap-4 md:grid-cols-[1.4fr_12rem_12rem]">
         <label className="grid gap-2 text-sm font-medium">
           Cliente
-          <input
+          <select
             className="h-10 rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            value={draft.customerName}
+            value={draft.customerId}
             onChange={(event) => {
-              onChange({ ...draft, customerName: event.target.value });
+              onChange({ ...draft, customerId: event.target.value });
             }}
-          />
+          >
+            <option value="">Seleccionar</option>
+            {clients.map((client) => (
+              <option key={client.id} value={client.id}>
+                {client.name}
+              </option>
+            ))}
+          </select>
         </label>
         <label className="grid gap-2 text-sm font-medium">
           Estado
@@ -658,7 +709,7 @@ function StatusBadge({ status }: { status: OrderStatus }) {
 }
 
 function parseOrderDraft(draft: OrderDraft): OrderInput | null {
-  const customerName = draft.customerName.trim();
+  const customerId = draft.customerId.trim();
   const paymentMethod = draft.paymentMethod.trim();
   const items = draft.items
     .map((item) => ({
@@ -668,7 +719,7 @@ function parseOrderDraft(draft: OrderDraft): OrderInput | null {
     .filter((item) => item.articleId);
 
   if (
-    !customerName ||
+    !customerId ||
     !paymentMethod ||
     !isPaymentMethod(paymentMethod) ||
     items.length === 0 ||
@@ -680,7 +731,7 @@ function parseOrderDraft(draft: OrderDraft): OrderInput | null {
   }
 
   return {
-    customerName,
+    customerId,
     status: draft.status,
     paymentMethod,
     items,
@@ -766,6 +817,10 @@ function getOrderErrorMessage(error: unknown) {
 
   if (error instanceof Error && error.message === "Invalid article.") {
     return "El pedido tiene un producto invalido o inactivo.";
+  }
+
+  if (error instanceof Error && error.message === "Invalid client.") {
+    return "Selecciona un cliente activo para generar el pedido.";
   }
 
   return "No se pudo generar el pedido.";

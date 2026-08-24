@@ -2,6 +2,7 @@ import { Navigate, createBrowserRouter } from "react-router-dom";
 import { mapErrorToUserMessage } from "@app/errors/errorMessages";
 import { authServices } from "@app/services/auth";
 import { catalogServices } from "@app/services/catalog";
+import { clientServices } from "@app/services/clients";
 import { inventoryServices } from "@app/services/inventory";
 import { orderServices } from "@app/services/orders";
 import { purchaseOrderServices } from "@app/services/purchaseOrders";
@@ -16,6 +17,7 @@ import {
   UserOnlyRoute
 } from "@features/auth";
 import { CatalogPage } from "@features/catalog";
+import { ClientsPage } from "@features/clients";
 import { HomePage } from "@features/home/HomePage";
 import { InventoryPage } from "@features/inventory";
 import { OrdersPage } from "@features/orders";
@@ -92,6 +94,12 @@ export const router = createBrowserRouter([
                 )
               },
               {
+                path: "clients",
+                element: (
+                  <ClientsPage clientsService={clientServices.clients} />
+                )
+              },
+              {
                 path: "inventory",
                 element: (
                   <InventoryPage
@@ -103,6 +111,7 @@ export const router = createBrowserRouter([
                 path: "orders",
                 element: (
                   <OrdersPage
+                    clientsService={clientServices.clients}
                     inventoryService={inventoryServices.inventory}
                     ordersService={orderServices.orders}
                   />
