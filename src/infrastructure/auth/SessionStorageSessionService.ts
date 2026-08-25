@@ -88,7 +88,9 @@ export class SessionStorageSessionService implements SessionService {
         "username" in parsed &&
         typeof parsed.username === "string" &&
         "role" in parsed &&
-        (parsed.role === "admin" || parsed.role === "user") &&
+        (parsed.role === "admin" ||
+          parsed.role === "user" ||
+          parsed.role === "seller") &&
         "expiresAt" in parsed &&
         typeof parsed.expiresAt === "number"
       ) {

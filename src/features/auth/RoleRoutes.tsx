@@ -6,7 +6,13 @@ export function HomeRedirect() {
 
   return (
     <Navigate
-      to={auth.session?.role === "admin" ? "/users" : "/dashboard"}
+      to={
+        auth.session?.role === "admin"
+          ? "/users"
+          : auth.session?.role === "seller"
+            ? "/seller-dashboard"
+            : "/dashboard"
+      }
       replace
     />
   );
@@ -16,7 +22,7 @@ export function AdminOnlyRoute() {
   const auth = useAuth();
 
   if (auth.session?.role !== "admin") {
-    return <Navigate to="/transactions" replace />;
+    return <Navigate to="/" replace />;
   }
 
   return <Outlet />;
@@ -25,8 +31,18 @@ export function AdminOnlyRoute() {
 export function UserOnlyRoute() {
   const auth = useAuth();
 
-  if (auth.session?.role === "admin") {
-    return <Navigate to="/users" replace />;
+  if (auth.session?.role !== "user") {
+    return <Navigate to="/" replace />;
+  }
+
+  return <Outlet />;
+}
+
+export function SellerOnlyRoute() {
+  const auth = useAuth();
+
+  if (auth.session?.role !== "seller") {
+    return <Navigate to="/" replace />;
   }
 
   return <Outlet />;

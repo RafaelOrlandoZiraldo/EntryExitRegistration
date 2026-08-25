@@ -1,14 +1,35 @@
+export type UserRole = "admin" | "user" | "seller";
+
+export interface SalesProfile {
+  userId: string;
+  catalogUserId: string;
+  commissionRate: number;
+  bonusGoalAmount: number;
+  bonusAmount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SalesProfileInput {
+  catalogUserId: string;
+  commissionRate: number;
+  bonusGoalAmount: number;
+  bonusAmount: number;
+}
+
 export interface AppUser {
   id: string;
   username: string;
-  role: "admin" | "user";
+  role: UserRole;
   createdAt: string;
+  salesProfile?: SalesProfile | null;
 }
 
 export interface CreateUserInput {
   username: string;
   password: string;
-  role: "admin" | "user";
+  role: UserRole;
+  salesProfile?: SalesProfileInput;
 }
 
 class HttpUserService {
@@ -35,6 +56,24 @@ class HttpUserService {
     const body = await readSuccessfulJson(response);
 
     return body.user as AppUser;
+  }
+
+  async updateSalesProfile(
+    id: string,
+    input: SalesProfileInput
+  ): Promise<SalesProfile> {
+    const response = await fetch(`/api/users/${id}/sales-profile`, {
+      method: "PUT",
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(input)
+    });
+
+    const body = await readSuccessfulJson(response);
+
+    return body.salesProfile as SalesProfile;
   }
 }
 

@@ -15,7 +15,7 @@ interface LocalApiEnv {
   LOCAL_API_ALLOW_RESET?: string;
 }
 
-type UserRole = "admin" | "user";
+type UserRole = "admin" | "user" | "seller";
 
 interface LocalUser {
   id: string;
@@ -26,6 +26,23 @@ interface LocalUser {
   passwordSalt: string;
   passwordIterations: number;
   createdAt: string;
+}
+
+interface SalesProfile {
+  userId: string;
+  catalogUserId: string;
+  commissionRate: number;
+  bonusGoalAmount: number;
+  bonusAmount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface SalesProfileInput {
+  catalogUserId: string;
+  commissionRate: number;
+  bonusGoalAmount: number;
+  bonusAmount: number;
 }
 
 interface FinancialTransaction {
@@ -261,6 +278,7 @@ interface LocalApiState {
   document: StorageDocument;
   backups: LocalBackup[];
   users: LocalUser[];
+  salesProfiles: SalesProfile[];
   catalogCategories: CatalogCategory[];
   catalogArticles: Omit<CatalogArticle, "categoryName">[];
   clients: Client[];
@@ -431,7 +449,7 @@ async function handleLocalApiRequest(input: {
     }
 
     sendJson(response, 200, {
-      users: state.users.map(stripUserSecrets)
+      users: state.users.map((user) => stripUserSecrets(state, user))
     });
     return;
   }
@@ -450,16 +468,26 @@ async function handleLocalApiRequest(input: {
     const password = isRecord(body) && typeof body.password === "string"
       ? body.password
       : "";
-    const role = isRecord(body) && body.role === "admin" ? "admin" : "user";
+    const role = readUserRole(isRecord(body) ? body.role : null);
+    const salesProfile =
+      role === "seller" && isRecord(body)
+        ? readSalesProfileInput(body.salesProfile)
+        : null;
 
     if (
       !isRecord(body) ||
       typeof body.username !== "string" ||
       typeof body.password !== "string" ||
-      (body.role !== "admin" && body.role !== "user") ||
+      role === null ||
       username.length === 0 ||
       password.length < 8 ||
-      state.users.some((user) => user.username === username)
+      state.users.some((user) => user.username === username) ||
+      (role === "seller" &&
+        (salesProfile === null ||
+          !state.users.some(
+            (user) =>
+              user.id === salesProfile.catalogUserId && user.role === "user"
+          )))
     ) {
       sendJson(response, 400, { error: "Invalid user." });
       return;
@@ -474,8 +502,56 @@ async function handleLocalApiRequest(input: {
     };
 
     state.users.push(user);
+    if (salesProfile !== null) {
+      state.salesProfiles.push(createSalesProfile(user.id, salesProfile));
+    }
     await writeState(dataFilePath, state);
-    sendJson(response, 201, { user: stripUserSecrets(user) });
+    sendJson(response, 201, { user: stripUserSecrets(state, user) });
+    return;
+  }
+
+  const salesProfileRoute = pathname.match(/^\/api\/users\/([^/]+)\/sales-profile$/);
+
+  if (salesProfileRoute && method === "PUT") {
+    if (session.role !== "admin") {
+      sendJson(response, 403, { error: "Forbidden." });
+      return;
+    }
+
+    const id = decodeURIComponent(salesProfileRoute[1]);
+    const body = await readJsonBody(request);
+    const input = readSalesProfileInput(body);
+    const seller = state.users.find((user) => user.id === id && user.role === "seller");
+
+    if (!seller) {
+      sendJson(response, 404, { error: "Not found." });
+      return;
+    }
+
+    if (
+      input === null ||
+      !state.users.some(
+        (user) => user.id === input.catalogUserId && user.role === "user"
+      )
+    ) {
+      sendJson(response, 400, { error: "Invalid sales profile." });
+      return;
+    }
+
+    const profile = upsertSalesProfile(state, id, input);
+
+    await writeState(dataFilePath, state);
+    sendJson(response, 200, { salesProfile: profile });
+    return;
+  }
+
+  if (pathname === "/api/sales/dashboard" && method === "GET") {
+    if (session.role !== "seller") {
+      sendJson(response, 403, { error: "Forbidden." });
+      return;
+    }
+
+    sendJson(response, 200, { dashboard: getSalesDashboard(state, session) });
     return;
   }
 
@@ -1076,7 +1152,7 @@ async function handleLocalApiRequest(input: {
   }
 
   if (pathname === "/api/orders" && method === "POST") {
-    if (session.role !== "user") {
+    if (session.role !== "user" && session.role !== "seller") {
       sendJson(response, 403, { error: "Forbidden." });
       return;
     }
@@ -1107,7 +1183,7 @@ async function handleLocalApiRequest(input: {
   const orderStatusRoute = pathname.match(/^\/api\/orders\/([^/]+)\/status$/);
 
   if (orderStatusRoute && method === "PUT") {
-    if (session.role !== "user") {
+    if (session.role !== "user" && session.role !== "seller") {
       sendJson(response, 403, { error: "Forbidden." });
       return;
     }
@@ -1338,6 +1414,7 @@ async function readState(filePath: string): Promise<LocalApiState> {
       return ensureLocalPurchaseOrderTransactions({
         ...parsed,
         users: parsed.users ?? [],
+        salesProfiles: parsed.salesProfiles ?? [],
         catalogCategories: parsed.catalogCategories ?? [],
         catalogArticles: parsed.catalogArticles ?? [],
         clients: parsed.clients ?? [],
@@ -1372,6 +1449,7 @@ function createEmptyState(): LocalApiState {
     },
     backups: [],
     users: [],
+    salesProfiles: [],
     catalogCategories: [],
     catalogArticles: [],
     clients: [],
@@ -1554,7 +1632,9 @@ function readSession(
     if (
       typeof session.userId !== "string" ||
       typeof session.username !== "string" ||
-      (session.role !== "admin" && session.role !== "user") ||
+      (session.role !== "admin" &&
+        session.role !== "user" &&
+        session.role !== "seller") ||
       typeof session.expiresAt !== "number" ||
       session.expiresAt <= Date.now()
     ) {
@@ -1591,10 +1671,11 @@ function getDocumentForSession(
 }
 
 function getCatalogForSession(state: LocalApiState, session: AuthSession) {
+  const catalogUserId = resolveCatalogUserId(state, session);
   const categories = state.catalogCategories
     .filter(
       (category) =>
-        session.role === "admin" || category.userId === session.userId
+        session.role === "admin" || category.userId === catalogUserId
     )
     .sort((left, right) => left.name.localeCompare(right.name));
   const categoryIds = new Set(categories.map((category) => category.id));
@@ -1602,7 +1683,7 @@ function getCatalogForSession(state: LocalApiState, session: AuthSession) {
     .filter(
       (article) =>
         categoryIds.has(article.categoryId) &&
-        (session.role === "admin" || article.userId === session.userId)
+        (session.role === "admin" || article.userId === catalogUserId)
     )
     .map((article) => hydrateCatalogArticle(state, article))
     .sort((left, right) => left.name.localeCompare(right.name));
@@ -1627,23 +1708,27 @@ function hydrateCatalogArticle(
 function getInventoryForSession(state: LocalApiState, session: AuthSession) {
   const catalog = getCatalogForSession(state, session);
   const articleIds = new Set(catalog.articles.map((article) => article.id));
-  const movements = state.inventoryMovements.filter(
-    (movement) =>
-      articleIds.has(movement.articleId) &&
-      (session.role === "admin" || movement.userId === session.userId)
+  const quantityMovements = state.inventoryMovements.filter((movement) =>
+    articleIds.has(movement.articleId)
   );
-  const quantities = movements.reduce<Record<string, number>>((current, movement) => {
-    const signedQuantity =
-      movement.type === "in"
-        ? movement.quantity
-        : movement.type === "out"
-          ? -movement.quantity
-          : movement.quantity;
+  const visibleMovements = quantityMovements.filter(
+    (movement) => session.role === "admin" || movement.userId === session.userId
+  );
+  const quantities = quantityMovements.reduce<Record<string, number>>(
+    (current, movement) => {
+      const signedQuantity =
+        movement.type === "in"
+          ? movement.quantity
+          : movement.type === "out"
+            ? -movement.quantity
+            : movement.quantity;
 
-    current[movement.articleId] =
-      (current[movement.articleId] ?? 0) + signedQuantity;
-    return current;
-  }, {});
+      current[movement.articleId] =
+        (current[movement.articleId] ?? 0) + signedQuantity;
+      return current;
+    },
+    {}
+  );
 
   return {
     items: catalog.articles.map((article) => ({
@@ -1656,7 +1741,7 @@ function getInventoryForSession(state: LocalApiState, session: AuthSession) {
       active: article.active,
       quantity: quantities[article.id] ?? 0
     })),
-    movements: movements
+    movements: visibleMovements
       .map((movement) => hydrateInventoryMovement(state, movement))
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
       .slice(0, 100)
@@ -1689,8 +1774,10 @@ function hydrateInventoryMovement(
 }
 
 function getClientsForSession(state: LocalApiState, session: AuthSession) {
+  const catalogUserId = resolveCatalogUserId(state, session);
+
   return state.clients
-    .filter((client) => session.role === "admin" || client.userId === session.userId)
+    .filter((client) => session.role === "admin" || client.userId === catalogUserId)
     .sort((left, right) => {
       if (left.active !== right.active) {
         return left.active ? -1 : 1;
@@ -1767,7 +1854,7 @@ function createLocalOrder(
   const client = state.clients.find(
     (candidate) =>
       candidate.id === input.customerId &&
-      candidate.userId === session.userId &&
+      candidate.userId === resolveCatalogUserId(state, session) &&
       candidate.active
   );
   const requestedItems = mergeOrderItems(input.items);
@@ -1965,12 +2052,183 @@ function createLocalPurchaseOrderNumber(
   return `OC-${String(count + 1).padStart(5, "0")}`;
 }
 
-function stripUserSecrets(user: LocalUser) {
+function resolveCatalogUserId(state: LocalApiState, session: AuthSession) {
+  if (session.role !== "seller") {
+    return session.userId;
+  }
+
+  return (
+    state.salesProfiles.find((profile) => profile.userId === session.userId)
+      ?.catalogUserId ?? session.userId
+  );
+}
+
+function readUserRole(value: unknown): UserRole | null {
+  if (value === "admin" || value === "user" || value === "seller") {
+    return value;
+  }
+
+  return null;
+}
+
+function readSalesProfileInput(value: unknown): SalesProfileInput | null {
+  if (
+    !isRecord(value) ||
+    typeof value.catalogUserId !== "string" ||
+    typeof value.commissionRate !== "number" ||
+    typeof value.bonusGoalAmount !== "number" ||
+    typeof value.bonusAmount !== "number" ||
+    value.catalogUserId.trim().length === 0 ||
+    !Number.isFinite(value.commissionRate) ||
+    value.commissionRate < 0 ||
+    value.commissionRate > 100 ||
+    !Number.isFinite(value.bonusGoalAmount) ||
+    value.bonusGoalAmount < 0 ||
+    !Number.isFinite(value.bonusAmount) ||
+    value.bonusAmount < 0
+  ) {
+    return null;
+  }
+
+  return {
+    catalogUserId: value.catalogUserId.trim(),
+    commissionRate: roundMoney(value.commissionRate),
+    bonusGoalAmount: roundMoney(value.bonusGoalAmount),
+    bonusAmount: roundMoney(value.bonusAmount)
+  };
+}
+
+function createSalesProfile(userId: string, input: SalesProfileInput): SalesProfile {
+  const now = new Date().toISOString();
+
+  return {
+    userId,
+    catalogUserId: input.catalogUserId,
+    commissionRate: input.commissionRate,
+    bonusGoalAmount: input.bonusGoalAmount,
+    bonusAmount: input.bonusAmount,
+    createdAt: now,
+    updatedAt: now
+  };
+}
+
+function upsertSalesProfile(
+  state: LocalApiState,
+  userId: string,
+  input: SalesProfileInput
+) {
+  const currentIndex = state.salesProfiles.findIndex(
+    (profile) => profile.userId === userId
+  );
+
+  if (currentIndex === -1) {
+    const profile = createSalesProfile(userId, input);
+
+    state.salesProfiles.push(profile);
+    return profile;
+  }
+
+  const current = state.salesProfiles[currentIndex];
+  const profile: SalesProfile = {
+    ...current,
+    catalogUserId: input.catalogUserId,
+    commissionRate: input.commissionRate,
+    bonusGoalAmount: input.bonusGoalAmount,
+    bonusAmount: input.bonusAmount,
+    updatedAt: new Date().toISOString()
+  };
+
+  state.salesProfiles[currentIndex] = profile;
+  return profile;
+}
+
+function getSalesDashboard(state: LocalApiState, session: AuthSession) {
+  const profile =
+    state.salesProfiles.find((current) => current.userId === session.userId) ??
+    createSalesProfile(session.userId, {
+      catalogUserId: session.userId,
+      commissionRate: 0,
+      bonusGoalAmount: 0,
+      bonusAmount: 0
+    });
+  const now = new Date();
+  const monthStart = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)
+  )
+    .toISOString()
+    .slice(0, 10);
+  const nextMonthStart = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1)
+  )
+    .toISOString()
+    .slice(0, 10);
+  const month = summarizeSales(state, session.userId, monthStart, nextMonthStart);
+  const allTime = summarizeSales(state, session.userId);
+  const commissionAmount = roundMoney(
+    month.totalAmount * (profile.commissionRate / 100)
+  );
+  const bonusAmount =
+    profile.bonusGoalAmount > 0 && month.totalAmount >= profile.bonusGoalAmount
+      ? profile.bonusAmount
+      : 0;
+
+  return {
+    seller: {
+      id: session.userId,
+      username: session.username
+    },
+    profile,
+    month: {
+      startsAt: monthStart,
+      totalAmount: month.totalAmount,
+      orderCount: month.orderCount,
+      averageOrderAmount:
+        month.orderCount > 0 ? roundMoney(month.totalAmount / month.orderCount) : 0,
+      commissionAmount,
+      bonusAmount,
+      estimatedPayout: roundMoney(commissionAmount + bonusAmount),
+      goalProgress:
+        profile.bonusGoalAmount > 0
+          ? Math.min(
+              100,
+              roundMoney((month.totalAmount / profile.bonusGoalAmount) * 100)
+            )
+          : 0
+    },
+    allTime
+  };
+}
+
+function summarizeSales(
+  state: LocalApiState,
+  userId: string,
+  startDate?: string,
+  endDate?: string
+) {
+  const orders = state.orders.filter(
+    (order) =>
+      order.userId === userId &&
+      order.status !== "cancelled" &&
+      (!startDate || order.createdAt.slice(0, 10) >= startDate) &&
+      (!endDate || order.createdAt.slice(0, 10) < endDate)
+  );
+
+  return {
+    totalAmount: roundMoney(
+      orders.reduce((total, order) => total + order.totalAmount, 0)
+    ),
+    orderCount: orders.length
+  };
+}
+
+function stripUserSecrets(state: LocalApiState, user: LocalUser) {
   return {
     id: user.id,
     username: user.username,
     role: user.role,
-    createdAt: user.createdAt
+    createdAt: user.createdAt,
+    salesProfile:
+      state.salesProfiles.find((profile) => profile.userId === user.id) ?? null
   };
 }
 
@@ -2424,6 +2682,7 @@ function isState(value: unknown): value is LocalApiState {
     readDocument(value.document) !== null &&
     Array.isArray(value.backups) &&
     (!("users" in value) || Array.isArray(value.users)) &&
+    (!("salesProfiles" in value) || Array.isArray(value.salesProfiles)) &&
     (!("catalogCategories" in value) ||
       Array.isArray(value.catalogCategories)) &&
     (!("catalogArticles" in value) || Array.isArray(value.catalogArticles)) &&

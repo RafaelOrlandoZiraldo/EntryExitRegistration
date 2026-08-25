@@ -1,4 +1,5 @@
 import type { AuthSession } from "./types";
+import { resolveCatalogUserId } from "./salesProfiles";
 
 export interface Client {
   id: string;
@@ -39,6 +40,7 @@ interface ClientRow {
 }
 
 export async function listClients(db: D1Database, session: AuthSession) {
+  const catalogUserId = await resolveCatalogUserId(db, session);
   const statement =
     session.role === "admin"
       ? db.prepare(
@@ -55,7 +57,7 @@ export async function listClients(db: D1Database, session: AuthSession) {
              WHERE user_id = ?
              ORDER BY active DESC, name COLLATE NOCASE`
           )
-          .bind(session.userId);
+          .bind(catalogUserId);
   const result = await statement.all<ClientRow>();
 
   return (result.results ?? []).map(mapClientRow);
@@ -202,9 +204,10 @@ export async function assertActiveClientBelongsToUser(
   id: string,
   session: AuthSession
 ) {
+  const catalogUserId = await resolveCatalogUserId(db, session);
   const client = await db
     .prepare("SELECT id FROM clients WHERE id = ? AND user_id = ? AND active = 1")
-    .bind(id, session.userId)
+    .bind(id, catalogUserId)
     .first<{ id: string }>();
 
   if (!client) {

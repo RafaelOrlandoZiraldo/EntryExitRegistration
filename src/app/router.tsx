@@ -6,6 +6,7 @@ import { clientServices } from "@app/services/clients";
 import { inventoryServices } from "@app/services/inventory";
 import { orderServices } from "@app/services/orders";
 import { purchaseOrderServices } from "@app/services/purchaseOrders";
+import { salesServices } from "@app/services/sales";
 import { supplierServices } from "@app/services/suppliers";
 import { transactionServices } from "@app/services/transactions";
 import { userServices } from "@app/services/users";
@@ -15,6 +16,7 @@ import {
   HomeRedirect,
   LoginPage,
   ProtectedRoute,
+  SellerOnlyRoute,
   UserOnlyRoute
 } from "@features/auth";
 import { CatalogPage } from "@features/catalog";
@@ -23,6 +25,7 @@ import { HomePage } from "@features/home/HomePage";
 import { InventoryPage } from "@features/inventory";
 import { OrdersPage } from "@features/orders";
 import { PurchaseOrdersPage } from "@features/purchase-orders";
+import { SalesDashboardPage } from "@features/sales";
 import { SuppliersPage } from "@features/suppliers";
 import { TransactionsPage } from "@features/transactions";
 import { UsersPage } from "@features/users";
@@ -149,6 +152,27 @@ export const router = createBrowserRouter([
               {
                 path: "user",
                 element: <Navigate to="/users" replace />
+              }
+            ]
+          },
+          {
+            element: <SellerOnlyRoute />,
+            children: [
+              {
+                path: "seller-dashboard",
+                element: (
+                  <SalesDashboardPage salesService={salesServices.sales} />
+                )
+              },
+              {
+                path: "seller-orders",
+                element: (
+                  <OrdersPage
+                    clientsService={clientServices.clients}
+                    inventoryService={inventoryServices.inventory}
+                    ordersService={orderServices.orders}
+                  />
+                )
               }
             ]
           },

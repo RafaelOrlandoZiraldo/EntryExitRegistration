@@ -36,7 +36,7 @@ export interface AuthSession {
   expiresAt: number;
 }
 
-export type UserRole = "admin" | "user";
+export type UserRole = "admin" | "user" | "seller";
 
 export interface AppUser {
   id: string;

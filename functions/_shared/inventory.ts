@@ -1,4 +1,5 @@
 import type { AuthSession } from "./types";
+import { resolveCatalogUserId } from "./salesProfiles";
 
 export type InventoryMovementType = "in" | "out" | "adjustment";
 
@@ -66,6 +67,7 @@ export async function listInventory(db: D1Database, session: AuthSession) {
 }
 
 export async function listInventoryItems(db: D1Database, session: AuthSession) {
+  const catalogUserId = await resolveCatalogUserId(db, session);
   const statement =
     session.role === "admin"
       ? db.prepare(
@@ -102,7 +104,7 @@ export async function listInventoryItems(db: D1Database, session: AuthSession) {
              GROUP BY a.id, a.name, c.name, a.sku, a.unit, a.price, a.active
              ORDER BY a.name COLLATE NOCASE`
           )
-          .bind(session.userId);
+          .bind(catalogUserId);
 
   const result = await statement.all<InventoryItemRow>();
 

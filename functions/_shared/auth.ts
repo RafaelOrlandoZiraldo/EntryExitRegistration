@@ -149,7 +149,9 @@ export async function readSession(request: Request, env: Env) {
     if (
       typeof session.userId !== "string" ||
       typeof session.username !== "string" ||
-      (session.role !== "admin" && session.role !== "user") ||
+      (session.role !== "admin" &&
+        session.role !== "user" &&
+        session.role !== "seller") ||
       typeof session.expiresAt !== "number" ||
       session.expiresAt <= Date.now()
     ) {

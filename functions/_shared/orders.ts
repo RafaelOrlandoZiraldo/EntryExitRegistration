@@ -1,5 +1,6 @@
 import type { AuthSession } from "./types";
 import { assertActiveClientBelongsToUser } from "./clients";
+import { resolveCatalogUserId } from "./salesProfiles";
 
 export type OrderStatus = "pending" | "confirmed" | "delivered" | "cancelled";
 
@@ -378,6 +379,7 @@ async function getArticlesForOrder(
   items: OrderInput["items"],
   session: AuthSession
 ) {
+  const catalogUserId = await resolveCatalogUserId(db, session);
   const articleIds = items.map((item) => item.articleId);
   const placeholders = articleIds.map(() => "?").join(", ");
 
@@ -396,7 +398,7 @@ async function getArticlesForOrder(
        WHERE a.user_id = ? AND a.id IN (${placeholders})
        GROUP BY a.id, a.name, a.price, a.active`
     )
-    .bind(session.userId, ...articleIds)
+    .bind(catalogUserId, ...articleIds)
     .all<ArticleForOrderRow>();
 
   return result.results ?? [];
@@ -408,10 +410,11 @@ async function getClientForOrder(
   session: AuthSession
 ) {
   await assertActiveClientBelongsToUser(db, id, session);
+  const catalogUserId = await resolveCatalogUserId(db, session);
 
   const client = await db
     .prepare("SELECT id, name FROM clients WHERE id = ? AND user_id = ?")
-    .bind(id, session.userId)
+    .bind(id, catalogUserId)
     .first<{ id: string; name: string }>();
 
   if (!client) {
@@ -540,7 +543,7 @@ function readOptionalTextProperty(key: string, value: unknown) {
 }
 
 function assertUserCanMutateOrders(session: AuthSession) {
-  if (session.role !== "user") {
+  if (session.role !== "user" && session.role !== "seller") {
     throw new Error("Forbidden.");
   }
 }
