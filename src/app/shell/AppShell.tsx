@@ -29,10 +29,20 @@ export function AppShell() {
   const location = useLocation();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const isAdmin = auth.session?.role === "admin";
+  const isSeller = auth.session?.role === "seller";
   const navigationItems = useMemo<NavigationItem[]>(
     () =>
       isAdmin
         ? [{ href: "/users", label: "Usuarios", icon: Users }]
+        : isSeller
+          ? [
+              {
+                href: "/seller-dashboard",
+                label: "Mi dashboard",
+                icon: LayoutDashboard
+              },
+              { href: "/seller-orders", label: "Pedidos", icon: ShoppingCart }
+            ]
         : [
             { href: "/dashboard", label: "Inicio", icon: LayoutDashboard },
             { href: "/transactions", label: "Movimientos", icon: ArrowLeftRight },
@@ -43,7 +53,7 @@ export function AppShell() {
             { href: "/orders", label: "Pedidos", icon: ShoppingCart },
             { href: "/purchase-orders", label: "Compras", icon: ShoppingBag }
           ],
-    [isAdmin]
+    [isAdmin, isSeller]
   );
 
   return (
@@ -68,7 +78,7 @@ export function AppShell() {
             {auth.session ? (
               <span className="hidden max-w-48 truncate text-sm text-muted-foreground sm:inline">
                 {auth.session.username} -{" "}
-                {auth.session.role === "admin" ? "Admin" : "Usuario"}
+                {formatRole(auth.session.role)}
               </span>
             ) : null}
             <Button
@@ -135,7 +145,7 @@ export function AppShell() {
               {auth.session ? (
                 <p className="truncate text-xs text-muted-foreground">
                   {auth.session.username} -{" "}
-                  {auth.session.role === "admin" ? "Admin" : "Usuario"}
+                  {formatRole(auth.session.role)}
                 </p>
               ) : null}
             </div>
@@ -202,4 +212,16 @@ function MobileNavigationLink({
 
 function isActivePath(pathname: string, href: string) {
   return pathname === href || pathname.startsWith(`${href}/`);
+}
+
+function formatRole(role: string) {
+  if (role === "admin") {
+    return "Admin";
+  }
+
+  if (role === "seller") {
+    return "Vendedor";
+  }
+
+  return "Usuario";
 }

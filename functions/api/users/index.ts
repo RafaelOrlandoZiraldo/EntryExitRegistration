@@ -1,5 +1,11 @@
 import { requireSession } from "../../_shared/auth";
 import { jsonResponse, methodNotAllowed, readJson } from "../../_shared/http";
+import {
+  assertUserCanOwnSalesCatalog,
+  listSalesProfiles,
+  readSalesProfileInput,
+  upsertSalesProfile
+} from "../../_shared/salesProfiles";
 import type { PagesContext, UserRole } from "../../_shared/types";
 import { createUser, listUsers } from "../../_shared/users";
 
@@ -14,12 +20,18 @@ export async function onRequestGet({ request, env }: PagesContext) {
     return jsonResponse({ error: "Forbidden." }, { status: 403 });
   }
 
+  const profiles = await listSalesProfiles(env.DB);
+  const profilesByUser = new Map(
+    profiles.map((profile) => [profile.userId, profile])
+  );
+
   return jsonResponse({
     users: (await listUsers(env.DB)).map((user) => ({
       id: user.id,
       username: user.username,
       role: user.role,
-      createdAt: user.createdAt
+      createdAt: user.createdAt,
+      salesProfile: profilesByUser.get(user.id) ?? null
     }))
   });
 }
@@ -45,9 +57,28 @@ export async function onRequestPost({ request, env }: PagesContext) {
     !("role" in body) ||
     typeof body.username !== "string" ||
     typeof body.password !== "string" ||
-    (body.role !== "admin" && body.role !== "user")
+    (body.role !== "admin" && body.role !== "user" && body.role !== "seller")
   ) {
     return jsonResponse({ error: "Invalid user." }, { status: 400 });
+  }
+
+  const salesProfileInput =
+    body.role === "seller" ? readSalesProfileInput(body.salesProfile) : null;
+
+  if (body.role === "seller" && salesProfileInput === null) {
+    return jsonResponse({ error: "Invalid sales profile." }, { status: 400 });
+  }
+
+  if (salesProfileInput !== null) {
+    try {
+      await assertUserCanOwnSalesCatalog(env.DB, salesProfileInput.catalogUserId);
+    } catch (error) {
+      if (error instanceof Error && error.message === "Invalid catalog user.") {
+        return jsonResponse({ error: "Invalid catalog user." }, { status: 400 });
+      }
+
+      throw error;
+    }
   }
 
   const password = await hashPassword(body.password);
@@ -75,6 +106,11 @@ export async function onRequestPost({ request, env }: PagesContext) {
 
   await createUser(env.DB, user);
 
+  const salesProfile =
+    salesProfileInput !== null
+      ? await upsertSalesProfile(env.DB, user.id, salesProfileInput)
+      : null;
+
   return jsonResponse(
     {
       user: {
@@ -82,6 +118,7 @@ export async function onRequestPost({ request, env }: PagesContext) {
         username: user.username,
         role: user.role,
         createdAt: user.createdAt,
+        salesProfile,
         passwordAlgorithm: user.passwordAlgorithm,
         passwordIterations: user.passwordIterations
       }

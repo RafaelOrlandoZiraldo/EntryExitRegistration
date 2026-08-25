@@ -1,6 +1,11 @@
-import { Plus, UserPlus } from "lucide-react";
+import { Plus, Save, UserPlus } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-import type { AppUser, CreateUserInput } from "@app/services/users";
+import type {
+  AppUser,
+  CreateUserInput,
+  SalesProfileInput,
+  UserRole
+} from "@app/services/users";
 import { useAuth } from "@features/auth";
 import {
   Button,
@@ -20,6 +25,11 @@ interface UsersPageProps {
   usersService: {
     list(this: void): Promise<AppUser[]>;
     create(this: void, input: CreateUserInput): Promise<AppUser>;
+    updateSalesProfile(
+      this: void,
+      id: string,
+      input: SalesProfileInput
+    ): Promise<unknown>;
   };
 }
 
@@ -35,6 +45,12 @@ export function UsersPage({ usersService }: UsersPageProps) {
     username: "",
     password: "",
     role: "user"
+  });
+  const [salesProfileForm, setSalesProfileForm] = useState<SalesProfileInput>({
+    catalogUserId: "",
+    commissionRate: 0,
+    bonusGoalAmount: 0,
+    bonusAmount: 0
   });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
@@ -80,15 +96,30 @@ export function UsersPage({ usersService }: UsersPageProps) {
       return;
     }
 
+    if (form.role === "seller" && salesProfileForm.catalogUserId.length === 0) {
+      notify({
+        type: "warning",
+        message: "Selecciona el usuario operativo para el vendedor."
+      });
+      return;
+    }
+
     setIsSubmitting(true);
 
     try {
       await usersService.create({
         username: form.username.trim(),
         password: form.password,
-        role: form.role
+        role: form.role,
+        ...(form.role === "seller" ? { salesProfile: salesProfileForm } : {})
       });
       setForm({ username: "", password: "", role: "user" });
+      setSalesProfileForm({
+        catalogUserId: "",
+        commissionRate: 0,
+        bonusGoalAmount: 0,
+        bonusAmount: 0
+      });
       notify({ type: "success", message: "Usuario creado correctamente." });
       if (options.closeAfterSave) {
         setFormOpen(false);
@@ -124,7 +155,7 @@ export function UsersPage({ usersService }: UsersPageProps) {
           <DialogHeader>
             <DialogTitle>Nuevo usuario</DialogTitle>
             <DialogDescription>
-              Crea accesos para usuarios y administradores.
+              Crea accesos para usuarios, vendedores y administradores.
             </DialogDescription>
           </DialogHeader>
 
@@ -169,16 +200,27 @@ export function UsersPage({ usersService }: UsersPageProps) {
                 className="h-10 rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 value={form.role}
                 onChange={(event) => {
-                  setForm((current) => ({
-                    ...current,
-                    role: event.target.value === "admin" ? "admin" : "user"
-                  }));
+                  const role = readUserRole(event.target.value);
+
+                  setForm((current) => ({ ...current, role }));
                 }}
               >
                 <option value="user">Usuario raso</option>
+                <option value="seller">Vendedor</option>
                 <option value="admin">Admin</option>
               </select>
             </label>
+            {form.role === "seller" ? (
+              <SalesProfileFields
+                profile={salesProfileForm}
+                users={
+                  state.status === "success"
+                    ? state.users.filter((user) => user.role === "user")
+                    : []
+                }
+                onChange={setSalesProfileForm}
+              />
+            ) : null}
             <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
               <Button
                 type="button"
@@ -232,7 +274,10 @@ export function UsersPage({ usersService }: UsersPageProps) {
               <tr>
                 <th className="px-4 py-3 font-medium">Usuario</th>
                 <th className="px-4 py-3 font-medium">Rol</th>
+                <th className="px-4 py-3 font-medium">Comision</th>
+                <th className="px-4 py-3 font-medium">Premio</th>
                 <th className="px-4 py-3 font-medium">Creado</th>
+                <th className="px-4 py-3 font-medium">Configurar</th>
               </tr>
             </thead>
             <tbody>
@@ -240,11 +285,35 @@ export function UsersPage({ usersService }: UsersPageProps) {
                 <tr key={user.id} className="border-t border-border">
                   <td className="px-4 py-3 font-medium">{user.username}</td>
                   <td className="px-4 py-3">
-                    {user.role === "admin" ? "Admin" : "Usuario raso"}
+                    {formatRole(user.role)}
+                  </td>
+                  <td className="px-4 py-3">
+                    {user.role === "seller"
+                      ? `${formatPercent(user.salesProfile?.commissionRate ?? 0)}`
+                      : "-"}
+                  </td>
+                  <td className="px-4 py-3">
+                    {user.role === "seller"
+                      ? `${formatMoney(user.salesProfile?.bonusAmount ?? 0)} desde ${formatMoney(
+                          user.salesProfile?.bonusGoalAmount ?? 0
+                        )}`
+                      : "-"}
                   </td>
                   <td className="px-4 py-3 text-muted-foreground">
                     {new Intl.DateTimeFormat("es-AR").format(
                       new Date(user.createdAt)
+                    )}
+                  </td>
+                  <td className="px-4 py-3">
+                    {user.role === "seller" ? (
+                      <SellerProfileEditor
+                        seller={user}
+                        users={state.users.filter((item) => item.role === "user")}
+                        usersService={usersService}
+                        onSaved={loadUsers}
+                      />
+                    ) : (
+                      <span className="text-muted-foreground">-</span>
                     )}
                   </td>
                 </tr>
@@ -255,4 +324,241 @@ export function UsersPage({ usersService }: UsersPageProps) {
       ) : null}
     </section>
   );
+}
+
+function SalesProfileFields({
+  profile,
+  users,
+  onChange
+}: {
+  profile: SalesProfileInput;
+  users: AppUser[];
+  onChange(this: void, profile: SalesProfileInput): void;
+}) {
+  return (
+    <div className="grid gap-4 rounded-md border border-border bg-muted/30 p-3">
+      <label className="grid gap-2 text-sm font-medium">
+        Usuario operativo
+        <select
+          className="h-10 rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          value={profile.catalogUserId}
+          onChange={(event) => {
+            onChange({ ...profile, catalogUserId: event.target.value });
+          }}
+        >
+          <option value="">Seleccionar</option>
+          {users.map((user) => (
+            <option key={user.id} value={user.id}>
+              {user.username}
+            </option>
+          ))}
+        </select>
+      </label>
+      <div className="grid gap-3 sm:grid-cols-3">
+        <NumberField
+          label="Comision %"
+          value={profile.commissionRate}
+          onChange={(commissionRate) => {
+            onChange({ ...profile, commissionRate });
+          }}
+        />
+        <NumberField
+          label="Objetivo premio"
+          value={profile.bonusGoalAmount}
+          onChange={(bonusGoalAmount) => {
+            onChange({ ...profile, bonusGoalAmount });
+          }}
+        />
+        <NumberField
+          label="Premio"
+          value={profile.bonusAmount}
+          onChange={(bonusAmount) => {
+            onChange({ ...profile, bonusAmount });
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function SellerProfileEditor({
+  seller,
+  users,
+  usersService,
+  onSaved
+}: {
+  seller: AppUser;
+  users: AppUser[];
+  usersService: UsersPageProps["usersService"];
+  onSaved(this: void): void;
+}) {
+  const [profile, setProfile] = useState<SalesProfileInput>({
+    catalogUserId: seller.salesProfile?.catalogUserId ?? "",
+    commissionRate: seller.salesProfile?.commissionRate ?? 0,
+    bonusGoalAmount: seller.salesProfile?.bonusGoalAmount ?? 0,
+    bonusAmount: seller.salesProfile?.bonusAmount ?? 0
+  });
+  const [isSaving, setIsSaving] = useState(false);
+  const { notify } = useToast();
+
+  useEffect(() => {
+    setProfile({
+      catalogUserId: seller.salesProfile?.catalogUserId ?? "",
+      commissionRate: seller.salesProfile?.commissionRate ?? 0,
+      bonusGoalAmount: seller.salesProfile?.bonusGoalAmount ?? 0,
+      bonusAmount: seller.salesProfile?.bonusAmount ?? 0
+    });
+  }, [seller.salesProfile]);
+
+  const save = async () => {
+    if (profile.catalogUserId.length === 0) {
+      notify({
+        type: "warning",
+        message: "Selecciona el usuario operativo del vendedor."
+      });
+      return;
+    }
+
+    setIsSaving(true);
+
+    try {
+      await usersService.updateSalesProfile(seller.id, profile);
+      notify({ type: "success", message: "Configuracion guardada." });
+      onSaved();
+    } catch {
+      notify({
+        type: "error",
+        message: "No se pudo guardar la configuracion del vendedor."
+      });
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  return (
+    <div className="grid min-w-[28rem] gap-2">
+      <div className="grid gap-2 md:grid-cols-[1fr_7rem_8rem_8rem_auto]">
+        <select
+          aria-label="Usuario operativo"
+          className="h-9 rounded-md border border-input bg-background px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          value={profile.catalogUserId}
+          onChange={(event) => {
+            setProfile({ ...profile, catalogUserId: event.target.value });
+          }}
+        >
+          <option value="">Operativo</option>
+          {users.map((user) => (
+            <option key={user.id} value={user.id}>
+              {user.username}
+            </option>
+          ))}
+        </select>
+        <NumberInput
+          ariaLabel="Comision"
+          value={profile.commissionRate}
+          onChange={(commissionRate) => {
+            setProfile({ ...profile, commissionRate });
+          }}
+        />
+        <NumberInput
+          ariaLabel="Objetivo premio"
+          value={profile.bonusGoalAmount}
+          onChange={(bonusGoalAmount) => {
+            setProfile({ ...profile, bonusGoalAmount });
+          }}
+        />
+        <NumberInput
+          ariaLabel="Premio"
+          value={profile.bonusAmount}
+          onChange={(bonusAmount) => {
+            setProfile({ ...profile, bonusAmount });
+          }}
+        />
+        <Button
+          aria-label="Guardar configuracion"
+          disabled={isSaving}
+          size="icon"
+          type="button"
+          variant="outline"
+          onClick={() => void save()}
+        >
+          <Save aria-hidden="true" className="h-4 w-4" />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+function NumberField({
+  label,
+  value,
+  onChange
+}: {
+  label: string;
+  value: number;
+  onChange(this: void, value: number): void;
+}) {
+  return (
+    <label className="grid gap-2 text-sm font-medium">
+      {label}
+      <NumberInput ariaLabel={label} value={value} onChange={onChange} />
+    </label>
+  );
+}
+
+function NumberInput({
+  ariaLabel,
+  value,
+  onChange
+}: {
+  ariaLabel: string;
+  value: number;
+  onChange(this: void, value: number): void;
+}) {
+  return (
+    <input
+      aria-label={ariaLabel}
+      className="h-9 rounded-md border border-input bg-background px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      min="0"
+      step="0.01"
+      type="number"
+      value={String(value)}
+      onChange={(event) => {
+        const nextValue = Number(event.target.value);
+
+        onChange(Number.isFinite(nextValue) ? nextValue : 0);
+      }}
+    />
+  );
+}
+
+function readUserRole(value: string): UserRole {
+  if (value === "admin" || value === "seller") {
+    return value;
+  }
+
+  return "user";
+}
+
+function formatRole(role: UserRole) {
+  const labels = {
+    admin: "Admin",
+    user: "Usuario raso",
+    seller: "Vendedor"
+  } satisfies Record<UserRole, string>;
+
+  return labels[role];
+}
+
+function formatPercent(value: number) {
+  return `${new Intl.NumberFormat("es-AR", {
+    maximumFractionDigits: 2
+  }).format(value)}%`;
+}
+
+function formatMoney(value: number) {
+  return new Intl.NumberFormat("es-AR", {
+    style: "currency",
+    currency: "ARS"
+  }).format(value);
 }
